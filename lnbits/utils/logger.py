@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import sys
+import re
 from hashlib import sha256
 from pathlib import Path
 from typing import Callable
@@ -46,11 +47,35 @@ def initialize_server_websocket_logger() -> Callable:
     return update_websocket_serverlog
 
 
+def hash_ip(ip: str) -> str:
+    return sha256(ip.encode()).hexdigest()
+
+def ip_hashing_filter(record: logging.LogRecord) -> bool:
+    ip_pattern = re.compile(r'(\d{1,3}\.){3}\d{1,3}')
+    if record.args:
+        record.args = tuple(
+            hash_ip(arg) if isinstance(arg, str) and ip_pattern.match(arg) else arg
+            for arg in record.args
+        )
+    if record.msg:
+        record.msg = ip_pattern.sub(lambda match: hash_ip(match.group(0)), record.msg)
+    return True
+
 def configure_logger() -> None:
     logger.remove()
     log_level: str = "DEBUG" if settings.debug else "INFO"
     formatter = Formatter()
     logger.add(sys.stdout, level=log_level, format=formatter.format)
+
+    # IP obfuscation
+    # Access the 'uvicorn.access' logger
+    uvicorn_access_logger = logging.getLogger('uvicorn.access')
+
+    # Add the IP hashing filter
+    uvicorn_access_logger.addFilter(ip_hashing_filter)
+
+    # Ensure the logger is enabled
+    uvicorn_access_logger.disabled = False
 
     if settings.enable_log_to_file:
         logger.add(
