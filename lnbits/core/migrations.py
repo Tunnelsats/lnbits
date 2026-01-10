@@ -743,3 +743,108 @@ async def m034_add_stored_paylinks_to_wallet(db: Connection):
         ALTER TABLE wallets ADD COLUMN stored_paylinks TEXT
         """
     )
+
+
+async def m035_add_wallet_type_column(db: Connection):
+    await db.execute(
+        """
+        ALTER TABLE wallets ADD COLUMN wallet_type TEXT DEFAULT 'lightning'
+        """
+    )
+
+
+async def m036_add_shared_wallet_column(db: Connection):
+    await db.execute(
+        """
+        ALTER TABLE wallets ADD COLUMN shared_wallet_id TEXT
+        """
+    )
+
+
+async def m037_create_assets_table(db: Connection):
+    await db.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS assets (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            mime_type TEXT NOT NULL,
+            is_public BOOLEAN NOT NULL DEFAULT false,
+            name TEXT NOT NULL,
+            size_bytes INT NOT NULL,
+            thumbnail_base64 TEXT,
+            thumbnail {db.blob},
+            data {db.blob} NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT {db.timestamp_now}
+        );
+        """
+    )
+
+
+async def m038_add_labels_for_payments(db: Connection):
+    await db.execute(
+        """
+        ALTER TABLE apipayments ADD COLUMN labels TEXT
+        """
+    )
+
+
+async def m039_index_payments(db: Connection):
+    indexes = [
+        "wallet_id",
+        "checking_id",
+        "payment_hash",
+        "amount",
+        "fee",
+        "labels",
+        "time",
+        "status",
+        "memo",
+        "created_at",
+        "updated_at",
+    ]
+    for index in indexes:
+        logger.debug(f"Creating index idx_payments_{index}...")
+        await db.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_payments_{index} ON apipayments ({index});
+            """
+        )
+
+
+async def m040_index_wallets(db: Connection):
+    indexes = [
+        "id",
+        "user",
+        "deleted",
+        "adminkey",
+        "inkey",
+        "wallet_type",
+        "created_at",
+        "updated_at",
+    ]
+
+    for index in indexes:
+        logger.debug(f"Creating index idx_wallets_{index}...")
+        await db.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_wallets_{index} ON wallets ("{index}");
+            """
+        )
+
+
+async def m042_index_accounts(db: Connection):
+    indexes = [
+        "id",
+        "email",
+        "username",
+        "pubkey",
+        "external_id",
+    ]
+
+    for index in indexes:
+        logger.debug(f"Creating index idx_wallets_{index}...")
+        await db.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_accounts_{index} ON accounts ("{index}");
+            """
+        )

@@ -12,6 +12,7 @@ from lnbits.db import FilterModel
 from lnbits.helpers import (
     is_valid_email_address,
     is_valid_external_id,
+    is_valid_label,
     is_valid_pubkey,
     is_valid_username,
 )
@@ -27,6 +28,21 @@ class UserNotifications(BaseModel):
     excluded_wallets: list[str] = []
     outgoing_payments_sats: int = 0
     incoming_payments_sats: int = 0
+
+
+class WalletInviteRequest(BaseModel):
+    request_id: str
+    from_user_name: str | None = None
+    to_wallet_id: str
+    to_wallet_name: str
+
+
+class UserLabel(BaseModel):
+    name: str = Field(regex=r"([A-Za-z0-9 ._-]{1,100}$)")
+    description: str | None = Field(default=None, max_length=250)
+    color: str | None = Field(
+        default=None, regex=r"^#[0-9A-Fa-f]{6}$"
+    )  # e.g., "#RRGGBB"
 
 
 class UserExtra(BaseModel):
@@ -45,6 +61,55 @@ class UserExtra(BaseModel):
     visible_wallet_count: int | None = 10
 
     notifications: UserNotifications = UserNotifications()
+
+    wallet_invite_requests: list[WalletInviteRequest] = []
+
+    labels: list[UserLabel] = []
+
+    def add_wallet_invite_request(
+        self,
+        request_id: str,
+        to_wallet_id: str,
+        to_wallet_name: str,
+        from_user_name: str | None = None,
+    ) -> WalletInviteRequest:
+        self.remove_wallet_invite_request(request_id)
+        invite = WalletInviteRequest(
+            request_id=request_id,
+            from_user_name=from_user_name,
+            to_wallet_id=to_wallet_id,
+            to_wallet_name=to_wallet_name,
+        )
+        self.wallet_invite_requests.append(invite)
+        return invite
+
+    def find_wallet_invite_request(self, request_id: str) -> WalletInviteRequest | None:
+        for invite in self.wallet_invite_requests:
+            if invite.request_id == request_id:
+                return invite
+        return None
+
+    def validate_labels(self):
+        seen_labels = set()
+        for label in self.labels:
+            if not label.name:
+                raise ValueError("Label name cannot be empty.")
+            # apply the same rule for labels as for usernames
+            if not is_valid_label(label.name):
+                raise ValueError(f"Invalid label name: {label.name}")
+            if label.name in seen_labels:
+                raise ValueError(f"Duplicate label name: {label.name}")
+            seen_labels.add(label.name)
+
+    def remove_wallet_invite_request(
+        self,
+        request_id: str,
+    ):
+        self.wallet_invite_requests = [
+            invite
+            for invite in self.wallet_invite_requests
+            if invite.request_id != request_id
+        ]
 
 
 class EndpointAccess(BaseModel):
@@ -107,8 +172,15 @@ class UserAcls(BaseModel):
         return None
 
 
-class Account(BaseModel):
+class AccountId(BaseModel):
     id: str
+
+    @property
+    def is_admin_id(self) -> bool:
+        return settings.is_admin_user(self.id)
+
+
+class Account(AccountId):
     external_id: str | None = None  # for external account linking
     username: str | None = None
     password_hash: str | None = None
@@ -128,6 +200,10 @@ class Account(BaseModel):
         self.is_super_user = settings.is_super_user(self.id)
         self.is_admin = settings.is_admin_user(self.id)
         self.fiat_providers = settings.get_fiat_providers_for_user(self.id)
+
+    @property
+    def has_password(self) -> bool:
+        return self.password_hash is not None
 
     def hash_password(self, password: str) -> str:
         """sets and returns the hashed password"""
@@ -160,6 +236,8 @@ class Account(BaseModel):
         if user_uuid4.hex != self.id:
             raise ValueError("User ID is not valid UUID4 hex string.")
 
+        self.extra.validate_labels()
+
 
 class AccountOverview(Account):
     transaction_count: int | None = 0
@@ -170,7 +248,7 @@ class AccountOverview(Account):
 
 class AccountFilters(FilterModel):
     __search_fields__ = [
-        "user",
+        "id",
         "email",
         "username",
         "pubkey",
@@ -178,17 +256,18 @@ class AccountFilters(FilterModel):
         "wallet_id",
     ]
     __sort_fields__ = [
-        "balance_msat",
+        "id",
         "email",
         "username",
-        "transaction_count",
-        "wallet_count",
-        "last_payment",
+        "pubkey",
+        "external_id",
+        "created_at",
+        "updated_at",
     ]
 
-    email: str | None = None
-    user: str | None = None
+    id: str | None = None
     username: str | None = None
+    email: str | None = None
     pubkey: str | None = None
     external_id: str | None = None
     wallet_id: str | None = None

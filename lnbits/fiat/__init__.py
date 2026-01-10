@@ -8,6 +8,7 @@ from loguru import logger
 from lnbits.fiat.base import FiatProvider
 from lnbits.settings import settings
 
+from .paypal import PayPalWallet
 from .stripe import StripeWallet
 
 fiat_module = importlib.import_module("lnbits.fiat")
@@ -15,6 +16,7 @@ fiat_module = importlib.import_module("lnbits.fiat")
 
 class FiatProviderType(Enum):
     stripe = "StripeWallet"
+    paypal = "PayPalWallet"
 
 
 async def get_fiat_provider(name: str) -> FiatProvider | None:
@@ -49,5 +51,6 @@ fiat_providers: dict[str, FiatProvider] = {}
 
 
 __all__ = [
+    "PayPalWallet",
     "StripeWallet",
 ]

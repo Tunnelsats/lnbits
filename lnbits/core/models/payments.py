@@ -59,6 +59,7 @@ class CreatePayment(BaseModel):
     expiry: datetime | None = None
     webhook: str | None = None
     fee: int = 0
+    labels: list[str] | None = None
 
 
 class Payment(BaseModel):
@@ -81,6 +82,7 @@ class Payment(BaseModel):
     time: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    labels: list[str] = []
     extra: dict = {}
 
     def __init__(self, **data):
@@ -184,9 +186,25 @@ class Payment(BaseModel):
 
 
 class PaymentFilters(FilterModel):
-    __search_fields__ = ["memo", "amount", "wallet_id", "tag", "status", "time"]
+    __search_fields__ = [
+        "memo",
+        "amount",
+        "wallet_id",
+        "tag",
+        "status",
+        "time",
+        "labels",
+    ]
 
-    __sort_fields__ = ["created_at", "amount", "fee", "memo", "time", "tag"]
+    __sort_fields__ = [
+        "created_at",
+        "updated_at",
+        "amount",
+        "fee",
+        "memo",
+        "time",
+        "tag",
+    ]
 
     status: str | None
     tag: str | None
@@ -198,6 +216,7 @@ class PaymentFilters(FilterModel):
     preimage: str | None
     payment_hash: str | None
     wallet_id: str | None
+    labels: str | None
 
 
 class PaymentDataPoint(BaseModel):
@@ -272,6 +291,7 @@ class CreateInvoice(BaseModel):
     bolt11: str | None = None
     lnurl_withdraw: LnurlWithdrawResponse | None = None
     fiat_provider: str | None = None
+    labels: list[str] = []
 
     @validator("payment_hash")
     def check_hex(cls, v):
@@ -320,3 +340,7 @@ class CancelInvoice(BaseModel):
     def check_hex(cls, v):
         _ = bytes.fromhex(v)
         return v
+
+
+class UpdatePaymentLabels(BaseModel):
+    labels: list[str] = []

@@ -35,6 +35,7 @@ class StripeTerminalOptions(BaseModel):
 
     capture_method: Literal["automatic", "manual"] = "automatic"
     metadata: dict[str, str] = Field(default_factory=dict)
+    reader_id: str | None = None
 
 
 class StripeCheckoutOptions(BaseModel):
@@ -170,7 +171,7 @@ class StripeWallet(FiatProvider):
             ("line_items[0][price]", subscription_id),
             ("line_items[0][quantity]", f"{quantity}"),
         ]
-        subscription_data = {**payment_options.dict(), "lnbits_action": "subscription"}
+        subscription_data = {**payment_options.dict(), "alan_action": "subscription"}
         subscription_data["extra"] = json.dumps(subscription_data.get("extra") or {})
 
         form_data += self._encode_metadata(
@@ -295,6 +296,15 @@ class StripeWallet(FiatProvider):
         r.raise_for_status()
         return r.json()
 
+    async def _process_terminal_payment_intent(
+        self, reader_id: str, payment_intent_id: str
+    ) -> None:
+        data = {"payment_intent": payment_intent_id}
+        r = await self.client.post(
+            f"/v1/terminal/readers/{reader_id}/process_payment_intent", data=data
+        )
+        r.raise_for_status()
+
     async def _create_checkout_invoice(
         self,
         amount_cents: int,
@@ -315,7 +325,7 @@ class StripeWallet(FiatProvider):
             ("mode", "payment"),
             ("success_url", success_url),
             ("metadata[payment_hash]", payment_hash),
-            ("metadata[lnbits_action]", "invoice"),
+            ("metadata[alan_action]", "invoice"),
             ("line_items[0][price_data][currency]", currency.lower()),
             ("line_items[0][price_data][product_data][name]", line_item_name),
             ("line_items[0][price_data][unit_amount]", str(amount_cents)),
@@ -378,6 +388,17 @@ class StripeWallet(FiatProvider):
                     ok=False,
                     error_message="Error: missing PaymentIntent or client_secret",
                 )
+            if term.reader_id:
+                try:
+                    await self._process_terminal_payment_intent(term.reader_id, pi_id)
+                except Exception as exc:
+                    logger.warning(exc)
+                    return FiatInvoiceResponse(
+                        ok=False,
+                        error_message=(
+                            "Error: unable to process PaymentIntent on reader"
+                        ),
+                    )
             return FiatInvoiceResponse(
                 ok=True, checking_id=pi_id, payment_request=client_secret
             )

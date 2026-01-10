@@ -1,6 +1,7 @@
 import asyncio
 import json
 import smtplib
+from asyncio.tasks import create_task
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from http import HTTPStatus
@@ -16,6 +17,7 @@ from lnbits.core.crud import (
     mark_webhook_sent,
 )
 from lnbits.core.crud.users import get_user
+from lnbits.core.crud.wallets import get_wallet
 from lnbits.core.models import Payment, Wallet
 from lnbits.core.models.notifications import (
     NOTIFICATION_TEMPLATES,
@@ -240,6 +242,10 @@ async def dispatch_webhook(payment: Payment):
     async with httpx.AsyncClient(headers=headers) as client:
         try:
             check_callback_url(payment.webhook)
+        except ValueError as exc:
+            await mark_webhook_sent(payment.payment_hash, "-1")
+            logger.warning(f"Invalid webhook URL {payment.webhook}: {exc!s}")
+        try:
             r = await client.post(payment.webhook, json=payment.json(), timeout=40)
             r.raise_for_status()
             await mark_webhook_sent(payment.payment_hash, str(r.status_code))
@@ -257,6 +263,12 @@ async def dispatch_webhook(payment: Payment):
 async def send_payment_notification(wallet: Wallet, payment: Payment):
     try:
         await send_ws_payment_notification(wallet, payment)
+        for shared in wallet.extra.shared_with:
+            if not shared.shared_with_wallet_id:
+                continue
+            shared_wallet = await get_wallet(shared.shared_with_wallet_id)
+            if shared_wallet and shared_wallet.can_view_payments:
+                await send_ws_payment_notification(shared_wallet, payment)
     except Exception as e:
         logger.error(f"Error sending websocket payment notification {e!s}")
     try:
@@ -273,6 +285,13 @@ async def send_payment_notification(wallet: Wallet, payment: Payment):
             await dispatch_webhook(payment)
     except Exception as e:
         logger.error(f"Error dispatching webhook: {e!s}")
+
+
+def send_payment_notification_in_background(wallet: Wallet, payment: Payment):
+    try:
+        create_task(send_payment_notification(wallet, payment))
+    except Exception as e:
+        logger.warning(f"Error sending payment notification: {e}")
 
 
 async def send_ws_payment_notification(wallet: Wallet, payment: Payment):
@@ -381,7 +400,7 @@ def _is_message_type_enabled(message_type: NotificationType) -> bool:
     if message_type == NotificationType.watchdog_check:
         return settings.lnbits_notification_watchdog
     if message_type == NotificationType.balance_delta:
-        return settings.notification_balance_delta_changed
+        return settings.notification_balance_delta_threshold_sats > 0
     if message_type == NotificationType.server_start_stop:
         return settings.lnbits_notification_server_start_stop
     if message_type == NotificationType.server_status:

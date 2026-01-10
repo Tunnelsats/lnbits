@@ -6,8 +6,8 @@ from uuid import uuid4
 
 import jwt
 import pytest
-import secp256k1
 import shortuuid
+from coincurve import PrivateKey
 from httpx import AsyncClient
 
 from lnbits.core.crud.users import (
@@ -24,7 +24,9 @@ from lnbits.core.models.users import (
     EndpointAccess,
     LoginUsr,
     UpdateAccessControlList,
+    UpdateUser,
     UserAcls,
+    UserLabel,
 )
 from lnbits.core.services.users import create_user_account
 from lnbits.core.views.user_api import api_users_reset_password
@@ -42,11 +44,11 @@ nostr_event = {
     "sig": "fb7eb47fa8355747f6837e55620103d73ba47b2c3164ab8319d2f164022a9f25"
     "6e00ecda7d3c8945f07b7d6ecc18cfff34c07bc99677309e2b9310d9fc1bb138",
 }
-private_key = secp256k1.PrivateKey(
+private_key = PrivateKey(
     bytes.fromhex("6e00ecda7d3c8945f07b7d6ecc18cfff34c07bc99677309e2b9310d9fc1bb138")
 )
-assert private_key.pubkey, "Pubkey not created."
-pubkey_hex = private_key.pubkey.serialize().hex()[2:]
+assert private_key.public_key, "Pubkey not created."
+pubkey_hex = private_key.public_key.format().hex()[2:]
 
 
 ################################ LOGIN ################################
@@ -552,9 +554,9 @@ async def test_register_nostr_ok(http_client: AsyncClient, settings: Settings):
     event = {**nostr_event}
     event["created_at"] = int(time.time())
 
-    private_key = secp256k1.PrivateKey(bytes.fromhex(os.urandom(32).hex()))
-    assert private_key.pubkey, "Pubkey not created."
-    pubkey_hex = private_key.pubkey.serialize().hex()[2:]
+    private_key = PrivateKey(bytes.fromhex(os.urandom(32).hex()))
+    assert private_key.public_key, "Pubkey not created."
+    pubkey_hex = private_key.public_key.format().hex()[2:]
     event_signed = sign_event(event, pubkey_hex, private_key)
     base64_event = base64.b64encode(json.dumps(event_signed).encode()).decode("ascii")
     response = await http_client.post(
@@ -759,9 +761,9 @@ async def test_change_pubkey_npub_ok(http_client: AsyncClient, settings: Setting
     payload: dict = jwt.decode(access_token, settings.auth_secret_key, ["HS256"])
     access_token_payload = AccessTokenPayload(**payload)
 
-    private_key = secp256k1.PrivateKey(bytes.fromhex(os.urandom(32).hex()))
-    assert private_key.pubkey, "Pubkey not created."
-    pubkey_hex = private_key.pubkey.serialize().hex()[2:]
+    private_key = PrivateKey(bytes.fromhex(os.urandom(32).hex()))
+    assert private_key.public_key, "Pubkey not created."
+    pubkey_hex = private_key.public_key.format().hex()[2:]
     npub = hex_to_npub(pubkey_hex)
 
     response = await http_client.put(
@@ -802,9 +804,9 @@ async def test_change_pubkey_ok(
     payload: dict = jwt.decode(access_token, settings.auth_secret_key, ["HS256"])
     access_token_payload = AccessTokenPayload(**payload)
 
-    private_key = secp256k1.PrivateKey(bytes.fromhex(os.urandom(32).hex()))
-    assert private_key.pubkey, "Pubkey not created."
-    pubkey_hex = private_key.pubkey.serialize().hex()[2:]
+    private_key = PrivateKey(bytes.fromhex(os.urandom(32).hex()))
+    assert private_key.public_key, "Pubkey not created."
+    pubkey_hex = private_key.public_key.format().hex()[2:]
 
     response = await http_client.put(
         "/api/v1/auth/pubkey",
@@ -1999,3 +2001,48 @@ async def test_api_delete_user_api_token_missing_token_id(
         json=delete_token_request.dict(),
     )
     assert response.status_code == 200, "Does noting if token not found."
+
+
+################################ Labels ################################
+@pytest.mark.anyio
+async def test_api_update_user_labels(http_client: AsyncClient):
+    tiny_id = shortuuid.uuid()[:8]
+    user = await create_user_account()
+    assert user.extra.labels == []
+
+    user.extra.labels = [
+        UserLabel(name="label 01", color="#FF0000"),
+        UserLabel(name="label 02", color="#00FF00"),
+    ]
+    data = UpdateUser(user_id=user.id, username=f"u{tiny_id}", extra=user.extra)
+    assert data.extra
+    response = await http_client.put(
+        "/api/v1/auth/update?usr=" + user.id, json=data.dict()
+    )
+    assert response.status_code == 200
+    user_data = response.json()
+    assert len(user_data["extra"]["labels"]) == 2
+    assert user_data["extra"]["labels"][0]["name"] == "label 01"
+    assert user_data["extra"]["labels"][0]["color"] == "#FF0000"
+    assert user_data["extra"]["labels"][1]["name"] == "label 02"
+    assert user_data["extra"]["labels"][1]["color"] == "#00FF00"
+
+    data.extra.labels = []
+    response = await http_client.put(
+        "/api/v1/auth/update?usr=" + user.id, json=data.dict()
+    )
+    assert response.status_code == 200
+    user_data = response.json()
+    assert len(user_data["extra"]["labels"]) == 0
+
+    json_data = data.dict()
+    json_data["extra"] = {"labels": [{"name": "label + 01", "color": "#FF0000"}]}
+    response = await http_client.put(
+        "/api/v1/auth/update?usr=" + user.id, json=json_data
+    )
+
+    assert response.status_code == 400
+    data = response.json()
+    assert (
+        """string does not match regex "([A-Za-z0-9 ._-]{1,100}$)""" in data["detail"]
+    )

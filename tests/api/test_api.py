@@ -1,12 +1,16 @@
 import hashlib
 from json import JSONDecodeError
 from unittest.mock import AsyncMock, Mock
+from uuid import uuid4
 
 import pytest
+import shortuuid
 from pytest_mock.plugin import MockerFixture
 
 from lnbits import bolt11
 from lnbits.core.models import CreateInvoice, Payment
+from lnbits.core.models.users import Account, UserExtra, UserLabel
+from lnbits.core.services.users import create_user_account
 from lnbits.core.views.payment_api import api_payment
 from lnbits.fiat.base import FiatInvoiceResponse
 from lnbits.settings import Settings
@@ -40,11 +44,28 @@ async def test_create_account(client, settings: Settings):
 # check POST and DELETE /api/v1/wallet with adminkey and user token:
 # create additional wallet and delete it
 @pytest.mark.anyio
-async def test_create_wallet_and_delete(
-    client, adminkey_headers_from, user_headers_from
-):
+async def test_create_wallet_and_delete(client, user_headers_from):
+    tiny_id = shortuuid.uuid()[:8]
     response = await client.post(
-        "/api/v1/wallet", json={"name": "test"}, headers=adminkey_headers_from
+        "/api/v1/auth/register",
+        json={
+            "username": f"u21.{tiny_id}",
+            "password": "secret1234",
+            "password_repeat": "secret1234",
+            "email": f"u21.{tiny_id}@lnbits.com",
+        },
+    )
+
+    client.cookies.clear()
+
+    access_token = response.json().get("access_token")
+    assert response.status_code == 200, "User created."
+    assert response.json().get("access_token") is not None
+
+    response = await client.post(
+        "/api/v1/wallet",
+        json={"name": "test"},
+        headers={"Authorization": f"Bearer {access_token}"},
     )
     assert response.status_code == 200
     result = response.json()
@@ -54,6 +75,7 @@ async def test_create_wallet_and_delete(
     assert "id" in result
     assert "adminkey" in result
 
+    # should not work with admin key only with user
     invalid_response = await client.delete(
         f"/api/v1/wallet/{result['id']}",
         headers={
@@ -65,7 +87,7 @@ async def test_create_wallet_and_delete(
 
     response = await client.delete(
         f"/api/v1/wallet/{result['id']}",
-        headers=user_headers_from,
+        headers={"Authorization": f"Bearer {access_token}"},
     )
     assert response.status_code == 200
 
@@ -370,7 +392,7 @@ async def test_pay_invoice_adminkey(client, invoice, adminkey_headers_from):
 
 @pytest.mark.anyio
 async def test_get_payments(client, inkey_fresh_headers_to, fake_payments):
-    fake_data, filters = fake_payments
+    _, filters = fake_payments
 
     async def get_payments(params: dict):
         response = await client.get(
@@ -414,8 +436,21 @@ async def test_get_payments_paginated(client, inkey_fresh_headers_to, fake_payme
     )
     assert response.status_code == 200
     paginated = response.json()
-    assert len(paginated["data"]) == 2
+    data = paginated["data"]
+    assert len(data) == 2
     assert paginated["total"] == len(fake_data)
+
+    checking_id_list = [payment["checking_id"] for payment in data]
+    params = {"checking_id[in]": ",".join(checking_id_list)}
+    response = await client.get(
+        "/api/v1/payments/paginated",
+        params=params,
+        headers=inkey_fresh_headers_to,
+    )
+    data = response.json()["data"]
+    assert len(data) == 2
+    for payment in data:
+        assert payment["checking_id"] in checking_id_list
 
 
 @pytest.mark.anyio
@@ -789,3 +824,176 @@ async def test_api_payments_pay_lnurl(client, adminkey_headers_from):
     )
     assert response.status_code == 400
     assert "value_error.url.scheme" in response.json()["detail"]
+
+
+################################ Labels ################################
+@pytest.mark.anyio
+async def test_api_search_payment_labels(client):
+    tiny_id = shortuuid.uuid()[:8]
+    user = await create_user_account(
+        Account(
+            id=uuid4().hex,
+            username=f"u{tiny_id}",
+            extra=UserExtra(
+                labels=[
+                    UserLabel(name="label A", color="#FF0000"),
+                    UserLabel(name="label B", color="#00FF00"),
+                ]
+            ),
+        )
+    )
+    assert len(user.extra.labels) == 2
+    adminkey = user.wallets[0].adminkey
+    payments_headers = {
+        "X-Api-Key": adminkey,
+        "Content-type": "application/json",
+    }
+
+    payment_count = 10
+    await _create_some_payments(payment_count, client, payments_headers)
+
+    # search payments by label A
+    response = await client.get(
+        "/api/v1/payments/paginated",
+        params={"labels[every]": ["label A"]},
+        headers=payments_headers,
+    )
+    assert response.is_success
+    data = response.json()
+    assert data["total"] == payment_count // 2
+    for payment in data["data"]:
+        assert "label A" in payment["labels"]
+
+    # search payments by label B
+    response = await client.get(
+        "/api/v1/payments/paginated",
+        params={"labels[every]": ["label B"]},
+        headers=payments_headers,
+    )
+    assert response.is_success
+    data = response.json()
+    assert data["total"] == payment_count // 3
+    for payment in data["data"]:
+        assert "label B" in payment["labels"]
+
+    # search payments by label C
+    response = await client.get(
+        "/api/v1/payments/paginated",
+        params={"labels[every]": ["label C"]},
+        headers=payments_headers,
+    )
+    assert response.is_success
+    data = response.json()
+    assert data["total"] == payment_count // 5
+    for payment in data["data"]:
+        assert "label C" in payment["labels"]
+
+    # search payments by label A and B
+    response = await client.get(
+        "/api/v1/payments/paginated",
+        params={"labels[every]": ["label A", "label B"]},
+        headers=payments_headers,
+    )
+    assert response.is_success
+    data = response.json()
+
+    assert data["total"] == payment_count // 6
+    for payment in data["data"]:
+        assert "label A" in payment["labels"]
+        assert "label B" in payment["labels"]
+
+    # search payments for random label D (no payments)
+    response = await client.get(
+        "/api/v1/payments/paginated",
+        params={"labels[every]": ["label D"]},
+        headers=payments_headers,
+    )
+    assert response.is_success
+    data = response.json()
+
+    assert data["total"] == 0
+
+    # search payments with no label filter (all payments)
+    response = await client.get(
+        "/api/v1/payments/paginated",
+        params={"labels[every]": []},
+        headers=payments_headers,
+    )
+    assert response.is_success
+    all_payments = response.json()
+
+    assert all_payments["total"] == payment_count
+
+    no_label_a_payment = next(
+        (
+            payment
+            for payment in all_payments["data"]
+            if "label A" not in payment["labels"]
+        ),
+        None,
+    )
+    assert no_label_a_payment is not None
+    payment_hash = no_label_a_payment["payment_hash"]
+    response = await client.put(
+        f"/api/v1/payments/{payment_hash}/labels",
+        headers=payments_headers,
+        json={"labels": ["label A"]},
+    )
+
+    # search payments by label A after update
+    response = await client.get(
+        "/api/v1/payments/paginated",
+        params={"labels[every]": ["label A"]},
+        headers=payments_headers,
+    )
+    assert response.is_success
+    data = response.json()
+    assert data["total"] == payment_count // 2 + 1  # one more after update
+    for payment in data["data"]:
+        assert "label A" in payment["labels"]
+
+    # remove label A from all payments
+    for payment in all_payments["data"]:
+        payment_hash = payment["payment_hash"]
+        response = await client.put(
+            f"/api/v1/payments/{payment_hash}/labels",
+            headers=payments_headers,
+            json={"labels": []},
+        )
+
+    # search payments by label A (none should have it now)
+    response = await client.get(
+        "/api/v1/payments/paginated",
+        params={"labels[every]": ["label A"]},
+        headers=payments_headers,
+    )
+    assert response.is_success
+    data = response.json()
+    assert data["total"] == 0
+
+
+async def _create_some_payments(payment_count: int, client, payments_headers):
+    payment_count = 10
+    for index in range(1, payment_count + 1):
+        labels = []
+        if index % 2 == 0:
+            labels.append("label A")
+        if index % 3 == 0:
+            labels.append("label B")
+        if index % 5 == 0:
+            # User does not have this label, but will be added to the payment.
+            labels.append("label C")
+        response = await client.post(
+            "/api/v1/payments",
+            headers=payments_headers,
+            json={
+                "out": False,
+                "amount": 1000 + index,
+                "memo": f"payment {index}",
+                "labels": labels,
+            },
+        )
+        assert response.is_success
+        data = response.json()
+        assert data["labels"] == labels
+    return payment_count

@@ -15,7 +15,10 @@ from lnbits import bolt11
 from lnbits.core.crud.payments import (
     get_payment_count_stats,
     get_wallets_stats,
+    update_payment,
 )
+from lnbits.core.crud.users import get_account
+from lnbits.core.db import db
 from lnbits.core.models import (
     CancelInvoice,
     CreateInvoice,
@@ -32,14 +35,17 @@ from lnbits.core.models import (
     SettleInvoice,
     SimpleStatus,
 )
-from lnbits.core.models.users import User
+from lnbits.core.models.payments import UpdatePaymentLabels
+from lnbits.core.models.users import AccountId
+from lnbits.core.models.wallets import BaseWalletTypeInfo
 from lnbits.db import Filters, Page
 from lnbits.decorators import (
     WalletTypeInfo,
-    check_user_exists,
+    check_account_id_exists,
     parse_filters,
     require_admin_key,
-    require_invoice_key,
+    require_base_admin_key,
+    require_base_invoice_key,
 )
 from lnbits.helpers import (
     filter_dict_keys,
@@ -64,7 +70,6 @@ from ..services import (
     perform_withdraw,
     settle_hold_invoice,
     update_pending_payment,
-    update_pending_payments,
 )
 
 payment_router = APIRouter(prefix="/api/v1/payments", tags=["Payments"])
@@ -79,10 +84,9 @@ payment_router = APIRouter(prefix="/api/v1/payments", tags=["Payments"])
     openapi_extra=generate_filter_params_openapi(PaymentFilters),
 )
 async def api_payments(
-    key_info: WalletTypeInfo = Depends(require_invoice_key),
+    key_info: BaseWalletTypeInfo = Depends(require_base_invoice_key),
     filters: Filters = Depends(parse_filters(PaymentFilters)),
 ):
-    await update_pending_payments(key_info.wallet.id)
     return await get_payments(
         wallet_id=key_info.wallet.id,
         pending=True,
@@ -98,11 +102,10 @@ async def api_payments(
     openapi_extra=generate_filter_params_openapi(PaymentFilters),
 )
 async def api_payments_history(
-    key_info: WalletTypeInfo = Depends(require_invoice_key),
+    key_info: BaseWalletTypeInfo = Depends(require_base_invoice_key),
     group: DateTrunc = Query("day"),
     filters: Filters[PaymentFilters] = Depends(parse_filters(PaymentFilters)),
 ):
-    await update_pending_payments(key_info.wallet.id)
     return await get_payments_history(key_info.wallet.id, group, filters)
 
 
@@ -115,14 +118,14 @@ async def api_payments_history(
 async def api_payments_counting_stats(
     count_by: PaymentCountField = Query("tag"),
     filters: Filters[PaymentFilters] = Depends(parse_filters(PaymentFilters)),
-    user: User = Depends(check_user_exists),
+    account_id: AccountId = Depends(check_account_id_exists),
 ):
-    if user.admin:
+    if account_id.is_admin_id:
         # admin user can see payments from all wallets
         for_user_id = None
     else:
         # regular user can only see payments from their wallets
-        for_user_id = user.id
+        for_user_id = account_id.id
 
     return await get_payment_count_stats(count_by, filters=filters, user_id=for_user_id)
 
@@ -135,14 +138,14 @@ async def api_payments_counting_stats(
 )
 async def api_payments_wallets_stats(
     filters: Filters[PaymentFilters] = Depends(parse_filters(PaymentFilters)),
-    user: User = Depends(check_user_exists),
+    account_id: AccountId = Depends(check_account_id_exists),
 ):
-    if user.admin:
+    if account_id.is_admin_id:
         # admin user can see payments from all wallets
         for_user_id = None
     else:
         # regular user can only see payments from their wallets
-        for_user_id = user.id
+        for_user_id = account_id.id
 
     return await get_wallets_stats(filters, user_id=for_user_id)
 
@@ -154,15 +157,15 @@ async def api_payments_wallets_stats(
     openapi_extra=generate_filter_params_openapi(PaymentFilters),
 )
 async def api_payments_daily_stats(
-    user: User = Depends(check_user_exists),
+    account_id: AccountId = Depends(check_account_id_exists),
     filters: Filters[PaymentFilters] = Depends(parse_filters(PaymentFilters)),
 ):
-    if user.admin:
+    if account_id.is_admin_id:
         # admin user can see payments from all wallets
         for_user_id = None
     else:
         # regular user can only see payments from their wallets
-        for_user_id = user.id
+        for_user_id = account_id.id
     return await get_payments_daily_stats(filters, user_id=for_user_id)
 
 
@@ -175,18 +178,30 @@ async def api_payments_daily_stats(
     openapi_extra=generate_filter_params_openapi(PaymentFilters),
 )
 async def api_payments_paginated(
-    key_info: WalletTypeInfo = Depends(require_invoice_key),
+    key_info: BaseWalletTypeInfo = Depends(require_base_invoice_key),
+    recheck_pending: bool = Query(
+        False, description="Force check and update of pending payments."
+    ),
     filters: Filters = Depends(parse_filters(PaymentFilters)),
-):
-    page = await get_payments_paginated(
-        wallet_id=key_info.wallet.id,
-        filters=filters,
-    )
-    for payment in page.data:
-        if payment.pending:
-            await update_pending_payment(payment)
+) -> Page[Payment]:
+    async with db.connect() as conn:
+        page = await get_payments_paginated(
+            wallet_id=key_info.wallet.id,
+            filters=filters,
+            conn=conn,
+        )
+        if not recheck_pending:
+            return page
 
-    return page
+        payments = []
+        for payment in page.data:
+            if payment.pending:
+                refreshed_payment = await update_pending_payment(payment, conn=conn)
+                payments.append(refreshed_payment)
+            else:
+                payments.append(payment)
+
+    return Page(data=payments, total=page.total)
 
 
 @payment_router.get(
@@ -199,19 +214,19 @@ async def api_payments_paginated(
 )
 async def api_all_payments_paginated(
     filters: Filters = Depends(parse_filters(PaymentFilters)),
-    user: User = Depends(check_user_exists),
+    account_id: AccountId = Depends(check_account_id_exists),
 ):
-    if user.admin:
+    if account_id.is_admin_id:
         # admin user can see payments from all wallets
         for_user_id = None
     else:
         # regular user can only see payments from their wallets
-        for_user_id = user.id
+        for_user_id = account_id.id
 
-    return await get_payments_paginated(
-        filters=filters,
-        user_id=for_user_id,
-    )
+    async with db.connect() as conn:
+        return await get_payments_paginated(
+            filters=filters, user_id=for_user_id, conn=conn
+        )
 
 
 @payment_router.post(
@@ -234,10 +249,10 @@ async def api_all_payments_paginated(
 )
 async def api_payments_create(
     invoice_data: CreateInvoice,
-    wallet: WalletTypeInfo = Depends(require_invoice_key),
+    key_info: BaseWalletTypeInfo = Depends(require_base_invoice_key),
 ) -> Payment:
-    wallet_id = wallet.wallet.id
-    if invoice_data.out is True and wallet.key_type == KeyType.admin:
+    wallet_id = key_info.wallet.id
+    if invoice_data.out is True and key_info.key_type == KeyType.admin:
         if not invoice_data.bolt11:
             raise HTTPException(
                 status_code=HTTPStatus.BAD_REQUEST,
@@ -247,6 +262,7 @@ async def api_payments_create(
             wallet_id=wallet_id,
             payment_request=invoice_data.bolt11,
             extra=invoice_data.extra,
+            labels=invoice_data.labels,
         )
         return payment
 
@@ -258,6 +274,26 @@ async def api_payments_create(
 
     # If the payment is not outgoing, we can create a new invoice.
     return await create_payment_request(wallet_id, invoice_data)
+
+
+@payment_router.put("/{payment_hash}/labels")
+async def api_update_payment_labels(
+    payment_hash: str,
+    data: UpdatePaymentLabels,
+    key_type: BaseWalletTypeInfo = Depends(require_base_admin_key),
+) -> SimpleStatus:
+    payment = await get_standalone_payment(payment_hash, wallet_id=key_type.wallet.id)
+    if payment is None:
+        raise HTTPException(HTTPStatus.NOT_FOUND, "Payment does not exist.")
+    account = await get_account(key_type.wallet.user)
+    if not account:
+        raise HTTPException(HTTPStatus.NOT_FOUND, "Account does not exist.")
+
+    # only keep labels that belong to the user
+    user_label_names = [label.name for label in account.extra.labels]
+    payment.labels = [label for label in data.labels if label in user_label_names]
+    await update_payment(payment)
+    return SimpleStatus(success=True, message="Payment labels updated.")
 
 
 @payment_router.get("/fee-reserve")
@@ -301,7 +337,7 @@ async def api_payment(payment_hash, x_api_key: str | None = Header(None)):
         return {"paid": False, "status": "failed"}
 
     try:
-        status = await payment.check_status()
+        payment = await update_pending_payment(payment)
     except Exception:
         if wallet and wallet.id == payment.wallet_id:
             return {"paid": False, "details": payment}
@@ -310,7 +346,7 @@ async def api_payment(payment_hash, x_api_key: str | None = Header(None)):
     if wallet and wallet.id == payment.wallet_id:
         return {
             "paid": payment.success,
-            "status": f"{status!s}",
+            "status": f"{payment.status!s}",
             "preimage": payment.preimage,
             "details": payment,
         }

@@ -25,12 +25,14 @@ window.localisation.en = {
   reconnect: 'Reconnect',
   open_channel: 'Open Channel',
   open: 'Open',
+  clear: 'Clear',
   close_channel: 'Close Channel',
   close: 'Close',
   restart: 'Restart server',
   image_library: 'Image Library',
   save: 'Save',
   save_tooltip: 'Save your changes',
+  must_save: 'You have unsaved changes',
   credit_debit: 'Credit / Debit',
   credit_hint: 'Press Enter to credit/debit wallet (negative values allowed)',
   credit_label: '{denomination} to credit/debit',
@@ -52,9 +54,17 @@ window.localisation.en = {
   stored_paylinks: 'Stored LNURL pay links',
   wallet: 'Wallet: ',
   wallet_name: 'Wallet name',
+  wallet_type: 'Wallet type',
+  shared_wallet: 'Shared Wallet',
+  share_wallet: 'Share Wallet',
+  update_permissions: 'Update Permissions',
+  shared_wallet_id: 'Shared Wallet ID',
+  shared_wallet_desc:
+    "You have been invited to have access to someone else's wallet.",
   wallets: 'Wallets',
   exclude_wallets: 'Exclude Wallets',
   add_wallet: 'Add wallet',
+  reject_wallet: 'Reject wallet',
   add_new_wallet: 'Add a new wallet',
   pin_wallet: 'Pin wallet',
   delete_wallet: 'Delete wallet',
@@ -64,6 +74,8 @@ window.localisation.en = {
   update_name: 'Update name',
   fiat_tracking: 'Fiat tracking',
   fiat_providers: 'Fiat providers',
+  fiat_warning_bitcoin:
+    'Fiat providers can get twitchy about anything bitcoin, so avoid using word "bitcoin" in your memos!',
   currency: 'Currency',
   update_currency: 'Update currency',
   press_to_claim: 'Press to claim bitcoin',
@@ -72,6 +84,10 @@ window.localisation.en = {
   donate: 'Donate',
   view_github: 'View on GitHub',
   voidwallet_active: 'VoidWallet is active! Payments disabled',
+  voidwallet_active_user:
+    'Funding source unavailable. Please contact your admin to configure.',
+  voidwallet_active_admin:
+    'Funding source unavailable. Click here to configure.',
   service_fee_badge: 'Service fee: {amount} % per transaction',
   service_fee_max_badge:
     'Service fee: {amount} % per transaction (max {max} {denom})',
@@ -137,6 +153,8 @@ window.localisation.en = {
   extensions: 'Extensions',
   no_extensions: "You don't have any extensions installed :(",
   created: 'Created',
+  created_at: 'Created At',
+  updated_at: 'Updated At',
   search_extensions: 'Search extensions',
   search_wallets: 'Search wallets',
   extension_sources: 'Extension Sources',
@@ -147,6 +165,7 @@ window.localisation.en = {
   repository: 'Repository',
   confirm_continue: 'Are you sure you want to continue?',
   manage_extension_details: 'Install/uninstall extension',
+  upload: 'Upload',
   install: 'Install',
   uninstall: 'Uninstall',
   drop_db: 'Remove Data',
@@ -220,6 +239,7 @@ window.localisation.en = {
   webhook_url: 'Webhook URL',
   webhook_url_hint:
     'Webhook URL to send the payment details to. It will be called when the payment is completed.',
+  copy_webhook_url: 'Copy webhook URL',
   webhook_events_list: 'The following events must be supported by the webhook:',
   webhook_stripe_description:
     'One the stripe side you must configure a webhook with a URL that points to your LNbits server.',
@@ -302,7 +322,7 @@ window.localisation.en = {
 
   notification_balance_delta_changed: 'Balance Delta Changed',
   notification_balance_delta_changed_desc:
-    'Notify when the diference between the node balance and the LNbits balance has changed even by 1 sat. This runs every minute.',
+    'Notify when the difference between the node balance and the LNbits balance has changed by more than the specified amount (in sats). Set to 0 to disable. This runs every minute.',
 
   enable_watchdog: 'Enable Watchdog Switch',
   enable_watchdog_desc:
@@ -395,6 +415,8 @@ window.localisation.en = {
   first_name: 'First Name',
   last_name: 'Last Name',
   picture: 'Picture',
+  user_picture_desc:
+    'URL to an image to use as profile picture. You can upload it as an asset.',
   verify_email: 'Verify email with',
   account: 'Account',
   update_account: 'Update Account',
@@ -409,6 +431,7 @@ window.localisation.en = {
   look_and_feel: 'Look and Feel',
   endpoint: 'Endpoint',
   api: 'API',
+  api_stripe: 'API',
   api_token: 'API Token',
   api_tokens: 'API Tokens',
   access_control_list: 'Access Control List',
@@ -419,6 +442,26 @@ window.localisation.en = {
   toggle_gradient: 'Toggle Gradient',
   gradient_background: 'Gradient Background',
   language: 'Language',
+  assets: 'Assets',
+  max_asset_size_mb: 'Max Asset Size (MB)',
+  max_asset_size_mb_desc:
+    'The maximum allowed size for asset uploads in megabytes (can use decimal values).',
+  assets_allowed_mime_types: 'Allowed MIME Types',
+  assets_allowed_mime_types_desc:
+    'The MIME types that are allowed for asset uploads. No value means all uploads are allowed.',
+  thumbnail_width: 'Thumbnail Width',
+  thumbnail_width_desc: 'Width of the generated thumbnail in pixels.',
+  thumbnail_height: 'Thumbnail Height',
+  thumbnail_height_desc: 'Height of the generated thumbnail in pixels.',
+  thumbnail_format: 'Thumbnail Format',
+  thumbnail_format_desc:
+    'Image format of the generated thumbnail (PNG, JPEG, etc.).',
+  max_assets_per_user: 'Max Assets Per User',
+  max_assets_per_user_desc:
+    'The maximum number of assets a user can upload. Zero means upload forbidden.',
+  assets_no_limit_users: 'Users Without Asset Limits',
+  assets_no_limit_users_desc:
+    'These users can upload an unlimited number of assets (user id based).',
   color_scheme: 'Color Scheme',
   visible_wallet_count: 'Visible Wallet Count',
   admin_settings: 'Admin Settings',
@@ -526,13 +569,18 @@ window.localisation.en = {
   reserve_fee_in_percent: 'Reserve fee in percent',
   payment_wait_time: 'Payment Wait Time (sec)',
   payment_wait_time_desc:
-    'How long to wait when making a payment before marking it as pending. Set higher values for HODL invoices, Boltz, etc.',
+    'Wait time before marking an outgoing payment as pending. Default: 5s; raise for slow-settling invoices.',
+  payment_wait_time_tooltip:
+    'Controls how long LNbits waits for an outgoing payment attempt to confirm before marking it as pending. Higher values help when paying slow-settling invoices (e.g., HODL invoices, Boltz). The payment will be rechecked later and updated automatically or manually.',
   server_management: 'Server Management',
   base_url: 'Base URL',
   base_url_label: 'Static/Base url for the server',
   authentication: 'Authentication',
   auth_token_expiry_label: 'Token expire minutes',
   auth_token_expiry_hint: 'Time in minutes until the token expires',
+  auth_authentication_cache_label: 'Cache time (minutes)',
+  auth_authentication_cache_hint:
+    'Time in minutes to cache successful authentication (0 to disable)',
   auth_allowed_methods_label: 'Allowed authorization methods',
   auth_allowed_methods_hint: 'Select authorization methods',
   auth_nostr_label: 'Nostr Request URL',
@@ -597,6 +645,8 @@ window.localisation.en = {
   denomination_error: 'Denomination must be 3 characters, or `sats`',
   ui_qr_code_logo: 'QR Code/Favicon Logo',
   ui_qr_code_logo_hint: 'QR code and favicon logo url',
+  ui_apple_touch_icon: 'Apple Touch Icon',
+  ui_apple_touch_icon_hint: 'Apple touch icon url',
   ui_custom_image: 'Custom Image',
   ui_custom_image_label: 'URL to custom image',
   ui_custom_image_hint: 'Image showed at homepage/login',
@@ -655,12 +705,18 @@ window.localisation.en = {
   view_list: 'View wallets as list',
   view_column: 'View wallets as rows',
   filter_payments: 'Filter payments',
+  filter_labels: 'Filter labels',
   filter_date: 'Filter by date',
   websocket_example: 'Websocket example',
+  client_id: 'Client ID',
   secret_key: 'Secret Key',
   signing_secret: 'Signing Secret',
   signing_secret_hint:
     'Signing secret for the webhook. Messages will be signed with this secret.',
+  webhook_id: 'Webhook ID',
+  webhook_id_hint: 'PayPal webhook ID used to verify incoming events.',
+  webhook_paypal_description:
+    'On the PayPal side configure a webhook pointing to your LNbits server.',
   callback_success_url: 'Callback Success URL',
   callback_success_url_hint:
     'The user will be redirected to this URL after the payment is successful',
@@ -670,5 +726,18 @@ window.localisation.en = {
   paid: 'Paid',
   funding_source_retries: 'Max Retries',
   funding_source_retries_desc:
-    'Maximum number of retries for funding sources, before it falls back to VoidWallet.'
+    'Maximum number of retries for funding sources, before it falls back to VoidWallet.',
+  add_label: 'Add Label',
+  label: 'Label',
+  labels: 'Labels',
+  label_filter: 'Label Filter',
+  no_labels_defined: 'No labels defined yet',
+  manage_labels: 'Manage Labels',
+  update_label: 'Update Label',
+  delete_label: 'Delete Label',
+  add_remove_labels: 'Add or Remove Labels',
+  payment_labels_updated: 'Payment labels updated',
+  color: 'Color',
+  sort: 'Sort',
+  sort_by: 'Sort by'
 }

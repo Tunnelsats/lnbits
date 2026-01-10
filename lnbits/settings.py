@@ -270,6 +270,7 @@ class ThemesSettings(LNbitsSettings):
     lnbits_allowed_currencies: list[str] = Field(default=[])
     lnbits_default_accounting_currency: str | None = Field(default=None)
     lnbits_qr_logo: str = Field(default="/static/images/favicon_qr_logo.png")
+    lnbits_apple_touch_icon: str | None = Field(default=None)
     lnbits_default_reaction: str = Field(default="confettiBothSides")
     lnbits_default_theme: str = Field(default="salvador")
     lnbits_default_border: str = Field(default="hard-border")
@@ -280,8 +281,11 @@ class ThemesSettings(LNbitsSettings):
 class OpsSettings(LNbitsSettings):
     lnbits_baseurl: str = Field(default="http://127.0.0.1:5000/")
     lnbits_hide_api: bool = Field(default=False)
-    lnbits_upload_size_bytes: int = Field(default=512_000, ge=0)  # 500kb
-    lnbits_upload_allowed_types: list[str] = Field(
+
+
+class AssetSettings(LNbitsSettings):
+    lnbits_max_asset_size_mb: float = Field(default=2.5, ge=0.0)
+    lnbits_assets_allowed_mime_types: list[str] = Field(
         default=[
             "image/png",
             "image/jpeg",
@@ -297,6 +301,18 @@ class OpsSettings(LNbitsSettings):
             "heics",
         ]
     )
+    lnbits_asset_thumbnail_width: int = Field(default=128, ge=0)
+    lnbits_asset_thumbnail_height: int = Field(default=128, ge=0)
+    lnbits_asset_thumbnail_format: str = Field(default="png")
+
+    lnbits_max_assets_per_user: int = Field(default=1, ge=0)
+    lnbits_assets_no_limit_users: list[str] = Field(default=[])
+
+    def is_unlimited_assets_user(self, user_id: str) -> bool:
+        return (
+            settings.is_admin_user(user_id)
+            or user_id in self.lnbits_assets_no_limit_users
+        )
 
 
 class FeeSettings(LNbitsSettings):
@@ -429,7 +445,7 @@ class NotificationsSettings(LNbitsSettings):
 
     lnbits_notification_settings_update: bool = Field(default=True)
     lnbits_notification_credit_debit: bool = Field(default=True)
-    notification_balance_delta_changed: bool = Field(default=True)
+    notification_balance_delta_threshold_sats: int = Field(default=1, ge=0)
     lnbits_notification_server_start_stop: bool = Field(default=True)
     lnbits_notification_watchdog: bool = Field(default=False)
     lnbits_notification_server_status_hours: int = Field(default=24, gt=0)
@@ -591,7 +607,6 @@ class BreezLiquidSdkFundingSource(LNbitsSettings):
 class BoltzFundingSource(LNbitsSettings):
     boltz_client_endpoint: str | None = Field(default="127.0.0.1:9002")
     boltz_client_macaroon: str | None = Field(default=None)
-    boltz_client_wallet: str | None = Field(default="lnbits")
     boltz_client_password: str = Field(default="")
     boltz_client_cert: str | None = Field(default=None)
     boltz_mnemonic: str | None = Field(default=None)
@@ -632,6 +647,20 @@ class StripeFiatProvider(LNbitsSettings):
     stripe_limits: FiatProviderLimits = Field(default_factory=FiatProviderLimits)
 
 
+class PayPalFiatProvider(LNbitsSettings):
+    paypal_enabled: bool = Field(default=False)
+    paypal_api_endpoint: str = Field(default="https://api-m.paypal.com")
+    paypal_client_id: str | None = Field(default=None)
+    paypal_client_secret: str | None = Field(default=None)
+    paypal_payment_success_url: str = Field(default="https://lnbits.com")
+    paypal_payment_webhook_url: str = Field(
+        default="https://your-lnbits-domain-here.com/api/v1/callback/paypal"
+    )
+    paypal_webhook_id: str | None = Field(default=None)
+
+    paypal_limits: FiatProviderLimits = Field(default_factory=FiatProviderLimits)
+
+
 class LightningSettings(LNbitsSettings):
     lightning_invoice_expiry: int = Field(default=3600, gt=0)
 
@@ -667,7 +696,7 @@ class FundingSourcesSettings(
     funding_source_max_retries: int = Field(default=4, ge=0)
 
 
-class FiatProvidersSettings(StripeFiatProvider):
+class FiatProvidersSettings(StripeFiatProvider, PayPalFiatProvider):
     def is_fiat_provider_enabled(self, provider: str | None) -> bool:
         """
         Checks if a specific fiat provider is enabled.
@@ -676,7 +705,8 @@ class FiatProvidersSettings(StripeFiatProvider):
             return False
         if provider == "stripe":
             return self.stripe_enabled
-        # Add checks for other fiat providers here as needed
+        if provider == "paypal":
+            return self.paypal_enabled
         return False
 
     def get_fiat_providers_for_user(self, user_id: str) -> list[str]:
@@ -690,7 +720,12 @@ class FiatProvidersSettings(StripeFiatProvider):
         ):
             allowed_providers.append("stripe")
 
-        # Add other fiat providers here as needed
+        if self.paypal_enabled and (
+            not self.paypal_limits.allowed_users
+            or user_id in self.paypal_limits.allowed_users
+        ):
+            allowed_providers.append("paypal")
+
         return allowed_providers
 
     def get_fiat_provider_limits(self, provider_name: str) -> FiatProviderLimits | None:
@@ -747,6 +782,7 @@ class AuthSettings(LNbitsSettings):
     # How many seconds after login the user is allowed to update its credentials.
     # A fresh login is required afterwards.
     auth_credetials_update_threshold: int = Field(default=120, gt=0)
+    auth_authentication_cache_minutes: int = Field(default=10, ge=0)
 
     def is_auth_method_allowed(self, method: AuthMethods):
         return method.value in self.auth_allowed_methods
@@ -867,6 +903,7 @@ class EditableSettings(
     ExtensionsSettings,
     ThemesSettings,
     OpsSettings,
+    AssetSettings,
     FeeSettings,
     ExchangeProvidersSettings,
     SecuritySettings,

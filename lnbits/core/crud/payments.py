@@ -33,13 +33,12 @@ async def get_payment(checking_id: str, conn: Connection | None = None) -> Payme
 
 async def get_standalone_payment(
     checking_id_or_hash: str,
-    conn: Connection | None = None,
     incoming: bool | None = False,
     wallet_id: str | None = None,
+    conn: Connection | None = None,
 ) -> Payment | None:
     clause: str = "checking_id = :checking_id OR payment_hash = :hash"
     values = {
-        "wallet_id": wallet_id,
         "checking_id": checking_id_or_hash,
         "hash": checking_id_or_hash,
     }
@@ -47,6 +46,10 @@ async def get_standalone_payment(
         clause = f"({clause}) AND amount > 0"
 
     if wallet_id:
+        wallet = await get_wallet(wallet_id, conn=conn)
+        if not wallet or not wallet.can_view_payments:
+            return None
+        values["wallet_id"] = wallet.source_wallet_id
         clause = f"({clause}) AND wallet_id = :wallet_id"
 
     row = await (conn or db).fetchone(
@@ -66,13 +69,16 @@ async def get_standalone_payment(
 async def get_wallet_payment(
     wallet_id: str, payment_hash: str, conn: Connection | None = None
 ) -> Payment | None:
+    wallet = await get_wallet(wallet_id, conn=conn)
+    if not wallet or not wallet.can_view_payments:
+        return None
     payment = await (conn or db).fetchone(
         """
         SELECT *
         FROM apipayments
         WHERE wallet_id = :wallet AND payment_hash = :hash
         """,
-        {"wallet": wallet_id, "hash": payment_hash},
+        {"wallet": wallet.source_wallet_id, "hash": payment_hash},
         Payment,
     )
     return payment
@@ -118,7 +124,6 @@ async def get_payments_paginated(  # noqa: C901
     Filters payments to be returned by:
       - complete | pending | failed | outgoing | incoming.
     """
-
     values: dict[str, Any] = {
         "time": since,
     }
@@ -128,7 +133,11 @@ async def get_payments_paginated(  # noqa: C901
         clause.append(f"time > {db.timestamp_placeholder('time')}")
 
     if wallet_id:
-        values["wallet_id"] = wallet_id
+        wallet = await get_wallet(wallet_id, conn=conn)
+        if not wallet or not wallet.can_view_payments:
+            return Page(data=[], total=0)
+
+        values["wallet_id"] = wallet.source_wallet_id
         clause.append("wallet_id = :wallet_id")
     elif user_id:
         only_user_wallets = await _only_user_wallets_statement(user_id, conn=conn)
@@ -171,6 +180,7 @@ async def get_payments_paginated(  # noqa: C901
         values,
         filters=filters,
         model=Payment,
+        table_name="apipayments",
     )
 
 
@@ -282,6 +292,7 @@ async def create_payment(
         fee=-abs(data.fee),
         tag=extra.get("tag", None),
         extra=extra,
+        labels=data.labels or [],
     )
 
     await (conn or db).insert("apipayments", payment)
@@ -314,13 +325,14 @@ async def get_payments_history(
     wallet_id: str | None = None,
     group: DateTrunc = "day",
     filters: Filters | None = None,
+    conn: Connection | None = None,
 ) -> list[PaymentHistoryPoint]:
     if not filters:
         filters = Filters()
 
     date_trunc = db.datetime_grouping(group)
 
-    values = {
+    values: dict[str, Any] = {
         "wallet_id": wallet_id,
     }
     # count outgoing payments if they are still pending
@@ -349,13 +361,13 @@ async def get_payments_history(
         filters.values(values),
     )
     if wallet_id:
-        wallet = await get_wallet(wallet_id)
-        if wallet:
-            balance = wallet.balance_msat
-        else:
-            raise ValueError("Unknown wallet")
+        wallet = await get_wallet(wallet_id, conn=conn)
+        if not wallet or not wallet.can_view_payments:
+            return []
+        balance = wallet.balance_msat
+        values["wallet_id"] = wallet.source_wallet_id
     else:
-        balance = await get_total_balance()
+        balance = await get_total_balance(conn=conn)
 
     # since we dont know the balance at the starting point,
     # we take the current balance and walk backwards

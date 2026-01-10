@@ -19,6 +19,8 @@ from lnbits.core.crud import (
     get_wallet_for_key,
 )
 from lnbits.core.crud.users import get_user_access_control_lists
+from lnbits.core.crud.wallets import get_base_wallet_for_key
+from lnbits.core.db import db
 from lnbits.core.models import (
     AccessTokenPayload,
     Account,
@@ -27,9 +29,12 @@ from lnbits.core.models import (
     User,
     WalletTypeInfo,
 )
+from lnbits.core.models.users import AccountId
+from lnbits.core.models.wallets import BaseWallet, BaseWalletTypeInfo
 from lnbits.db import Connection, Filter, Filters, TFilterModel
-from lnbits.helpers import normalize_path, path_segments
+from lnbits.helpers import normalize_path, path_segments, sha256s
 from lnbits.settings import AuthMethods, settings
+from lnbits.utils.cache import cache
 
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="api/v1/auth",
@@ -52,7 +57,7 @@ api_key_query = APIKeyQuery(
 )
 
 
-class KeyChecker(SecurityBase):
+class BaseKeyChecker(SecurityBase):
     def __init__(
         self,
         api_key: str | None = None,
@@ -77,8 +82,7 @@ class KeyChecker(SecurityBase):
             )
         self.model: APIKey = openapi_model  # type: ignore
 
-    async def __call__(self, request: Request) -> WalletTypeInfo:
-
+    def _extract_key_value(self, request):
         key_value = (
             self._api_key
             if self._api_key
@@ -91,25 +95,86 @@ class KeyChecker(SecurityBase):
                 detail="No Api Key provided.",
             )
 
-        wallet = await get_wallet_for_key(key_value)
+        return key_value
 
-        if not wallet:
-            raise HTTPException(
-                status_code=HTTPStatus.NOT_FOUND,
-                detail="Wallet not found.",
-            )
-
-        request.scope["user_id"] = wallet.user
+    async def _extract_key_type(self, key_value: str, wallet: BaseWallet) -> KeyType:
         if self.expected_key_type is KeyType.admin and wallet.adminkey != key_value:
             raise HTTPException(
                 status_code=HTTPStatus.FORBIDDEN,
                 detail="Invalid adminkey.",
             )
 
-        await _check_user_extension_access(wallet.user, request["path"])
-
         key_type = KeyType.admin if wallet.adminkey == key_value else KeyType.invoice
+        return key_type
+
+
+class KeyChecker(BaseKeyChecker):
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        expected_key_type: KeyType | None = None,
+    ):
+        super().__init__(api_key, expected_key_type)
+
+    async def __call__(self, request: Request) -> WalletTypeInfo:
+        key_value = self._extract_key_value(request)
+
+        async with db.connect() as conn:
+            wallet = await get_wallet_for_key(key_value, conn=conn)
+
+            if not wallet:
+                raise HTTPException(
+                    status_code=HTTPStatus.NOT_FOUND,
+                    detail="Wallet not found.",
+                )
+
+            request.scope["user_id"] = wallet.user
+            await _check_user_access(request, wallet.user, conn=conn)
+
+        key_type = await self._extract_key_type(key_value, wallet)
         return WalletTypeInfo(key_type, wallet)
+
+
+class LightKeyChecker(BaseKeyChecker):
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        expected_key_type: KeyType | None = None,
+    ):
+        super().__init__(api_key, expected_key_type)
+
+    async def __call__(self, request: Request) -> BaseWalletTypeInfo:
+        key_value = self._extract_key_value(request)
+        cache_key = f"auth:x-api-key:{key_value}"
+        cache_time = settings.auth_authentication_cache_minutes * 60
+
+        async with db.connect() as conn:
+            if cache_time > 0:
+                key_info: BaseWalletTypeInfo | None = cache.get(cache_key)
+                if key_info:
+                    request.scope["user_id"] = key_info.wallet.user
+                    await _check_user_access(request, key_info.wallet.user, conn=conn)
+                    return key_info
+
+            wallet = await get_base_wallet_for_key(key_value, conn=conn)
+
+            if not wallet:
+                raise HTTPException(
+                    status_code=HTTPStatus.NOT_FOUND,
+                    detail="Wallet not found.",
+                )
+            request.scope["user_id"] = wallet.user
+            await _check_user_access(request, wallet.user, conn=conn)
+
+        key_type = await self._extract_key_type(key_value, wallet)
+        key_info = BaseWalletTypeInfo(key_type, wallet)
+
+        if cache_time > 0:
+            cache.set(cache_key, key_info, expiry=cache_time)
+            cache.set(f"auth:wallet:{wallet.id}", wallet, expiry=cache_time)
+        return key_info
 
 
 async def require_admin_key(
@@ -118,6 +183,18 @@ async def require_admin_key(
     api_key_query: str = Security(api_key_query),
 ) -> WalletTypeInfo:
     check: KeyChecker = KeyChecker(
+        api_key=api_key_header or api_key_query,
+        expected_key_type=KeyType.admin,
+    )
+    return await check(request)
+
+
+async def require_base_admin_key(
+    request: Request,
+    api_key_header: str = Security(api_key_header),
+    api_key_query: str = Security(api_key_query),
+) -> BaseWalletTypeInfo:
+    check: LightKeyChecker = LightKeyChecker(
         api_key=api_key_header or api_key_query,
         expected_key_type=KeyType.admin,
     )
@@ -136,6 +213,18 @@ async def require_invoice_key(
     return await check(request)
 
 
+async def require_base_invoice_key(
+    request: Request,
+    api_key_header: str = Security(api_key_header),
+    api_key_query: str = Security(api_key_query),
+) -> BaseWalletTypeInfo:
+    check: LightKeyChecker = LightKeyChecker(
+        api_key=api_key_header or api_key_query,
+        expected_key_type=KeyType.invoice,
+    )
+    return await check(request)
+
+
 async def check_access_token(
     header_access_token: Annotated[str | None, Depends(oauth2_scheme)],
     cookie_access_token: Annotated[str | None, Cookie()] = None,
@@ -144,33 +233,95 @@ async def check_access_token(
     return header_access_token or cookie_access_token or bearer_access_token
 
 
+async def check_account_id_exists(
+    r: Request,
+    access_token: Annotated[str | None, Depends(check_access_token)],
+    usr: UUID4 | None = None,
+) -> AccountId:
+    cache_key: str | None = None
+    if access_token:
+        cache_key = f"auth:access_token:{sha256s(access_token)}"
+    elif usr:
+        cache_key = f"auth:user_id:{sha256s(usr.hex)}"
+
+    async with db.connect() as conn:
+        if cache_key and settings.auth_authentication_cache_minutes > 0:
+            account_id = cache.get(cache_key)
+            if account_id:
+                r.scope["user_id"] = account_id.id
+                await _check_user_access(r, account_id.id, conn=conn)
+                return account_id
+
+        account = await _check_account_exists(r, access_token, usr, conn=conn)
+        account_id = AccountId(id=account.id)
+
+    if cache_key and settings.auth_authentication_cache_minutes > 0:
+        cache.set(
+            cache_key,
+            account_id,
+            expiry=settings.auth_authentication_cache_minutes * 60,
+        )
+
+    return account_id
+
+
+async def check_account_exists(
+    r: Request,
+    access_token: Annotated[str | None, Depends(check_access_token)],
+    usr: UUID4 | None = None,
+) -> Account:
+    return await _check_account_exists(r, access_token, usr)
+
+
+async def _check_account_exists(
+    r: Request,
+    access_token: Annotated[str | None, Depends(check_access_token)],
+    usr: UUID4 | None = None,
+    conn: Connection | None = None,
+) -> Account:
+    """
+    Check that the account exists based on access token or user id.
+    More performant version of `check_user_exists`.
+    Unlike `check_user_exists`, this function:
+      - does not fetch the user wallets
+      - caches the account info based on settings cache time
+    """
+    async with db.reuse_conn(conn) if conn else db.connect() as new_conn:
+        if access_token:
+            account = await _get_account_from_token(
+                access_token, r["path"], r["method"], conn=new_conn
+            )
+        elif usr and settings.is_auth_method_allowed(AuthMethods.user_id_only):
+            account = await get_account(usr.hex, conn=new_conn)
+            if account and account.is_admin:
+                raise HTTPException(
+                    HTTPStatus.FORBIDDEN, "User id only access for admins is forbidden."
+                )
+        else:
+            raise HTTPException(
+                HTTPStatus.UNAUTHORIZED, "Missing user ID or access token."
+            )
+
+        if not account:
+            raise HTTPException(HTTPStatus.UNAUTHORIZED, "User not found.")
+
+        r.scope["user_id"] = account.id
+        await _check_user_access(r, account.id, conn=new_conn)
+
+    return account
+
+
 async def check_user_exists(
     r: Request,
     access_token: Annotated[str | None, Depends(check_access_token)],
     usr: UUID4 | None = None,
 ) -> User:
-    if access_token:
-        account = await _get_account_from_token(access_token, r["path"], r["method"])
-    elif usr and settings.is_auth_method_allowed(AuthMethods.user_id_only):
-        account = await get_account(usr.hex)
-        if account and account.is_admin:
-            raise HTTPException(
-                HTTPStatus.FORBIDDEN, "User id only access for admins is forbidden."
-            )
-    else:
-        raise HTTPException(HTTPStatus.UNAUTHORIZED, "Missing user ID or access token.")
-
-    if not account:
-        raise HTTPException(HTTPStatus.UNAUTHORIZED, "User not found.")
-
-    r.scope["user_id"] = account.id
-    if not settings.is_user_allowed(account.id):
-        raise HTTPException(HTTPStatus.FORBIDDEN, "User not allowed.")
-
-    user = await get_user_from_account(account)
+    async with db.connect() as conn:
+        account = await _check_account_exists(r, access_token, usr, conn=conn)
+        user = await get_user_from_account(account, conn=conn)
     if not user:
         raise HTTPException(HTTPStatus.UNAUTHORIZED, "User not found.")
-    await _check_user_extension_access(user.id, r["path"])
+
     return user
 
 
@@ -198,29 +349,36 @@ async def access_token_payload(
     return AccessTokenPayload(**payload)
 
 
-async def check_admin(user: Annotated[User, Depends(check_user_exists)]) -> User:
-    if user.id != settings.super_user and user.id not in settings.lnbits_admin_users:
+async def check_admin(
+    account: Annotated[Account, Depends(check_account_exists)],
+) -> Account:
+    if (
+        account.id != settings.super_user
+        and account.id not in settings.lnbits_admin_users
+    ):
         raise HTTPException(
             HTTPStatus.FORBIDDEN, "User not authorized. No admin privileges."
         )
-    if not user.has_password:
+    if not account.has_password:
         raise HTTPException(
             HTTPStatus.FORBIDDEN, "Admin users must have credentials configured."
         )
 
-    return user
+    return account
 
 
-async def check_super_user(user: Annotated[User, Depends(check_user_exists)]) -> User:
-    if user.id != settings.super_user:
+async def check_super_user(
+    account: Annotated[Account, Depends(check_admin)],
+) -> Account:
+    if account.id != settings.super_user:
         raise HTTPException(
             HTTPStatus.FORBIDDEN, "User not authorized. No super user privileges."
         )
-    if not user.has_password:
+    if not account.has_password:
         raise HTTPException(
             HTTPStatus.FORBIDDEN, "Super user must have credentials configured."
         )
-    return user
+    return account
 
 
 def parse_filters(model: type[TFilterModel]):
@@ -280,9 +438,17 @@ async def check_user_extension_access(
     return SimpleStatus(success=True, message="OK")
 
 
-async def _check_user_extension_access(user_id: str, path: str):
+async def _check_user_access(r: Request, user_id: str, conn: Connection | None = None):
+    if not settings.is_user_allowed(user_id):
+        raise HTTPException(HTTPStatus.FORBIDDEN, "User not allowed.")
+    await _check_user_extension_access(user_id, r["path"], conn=conn)
+
+
+async def _check_user_extension_access(
+    user_id: str, path: str, conn: Connection | None = None
+):
     ext_id = path_segments(path)[0]
-    status = await check_user_extension_access(user_id, ext_id)
+    status = await check_user_extension_access(user_id, ext_id, conn=conn)
     if not status.success:
         raise HTTPException(
             HTTPStatus.FORBIDDEN,
@@ -291,12 +457,12 @@ async def _check_user_extension_access(user_id: str, path: str):
 
 
 async def _get_account_from_token(
-    access_token: str, path: str, method: str
+    access_token: str, path: str, method: str, conn: Connection | None = None
 ) -> Account | None:
     try:
         payload: dict = jwt.decode(access_token, settings.auth_secret_key, ["HS256"])
         return await _get_account_from_jwt_payload(
-            AccessTokenPayload(**payload), path, method
+            AccessTokenPayload(**payload), path, method, conn=conn
         )
 
     except jwt.ExpiredSignatureError as exc:
@@ -309,33 +475,35 @@ async def _get_account_from_token(
 
 
 async def _get_account_from_jwt_payload(
-    payload: AccessTokenPayload, path: str, method: str
+    payload: AccessTokenPayload, path: str, method: str, conn: Connection | None = None
 ) -> Account | None:
     account = None
     if payload.sub:
-        account = await get_account_by_username(payload.sub)
+        account = await get_account_by_username(payload.sub, conn=conn)
     elif payload.usr:
-        account = await get_account(payload.usr)
+        account = await get_account(payload.usr, conn=conn)
     elif payload.email:
-        account = await get_account_by_email(payload.email)
+        account = await get_account_by_email(payload.email, conn=conn)
 
     if not account:
         return None
 
     if payload.api_token_id:
-        await _check_account_api_access(account.id, payload.api_token_id, path, method)
+        await _check_account_api_access(
+            account.id, payload.api_token_id, path, method, conn=conn
+        )
 
     return account
 
 
 async def _check_account_api_access(
-    user_id: str, token_id: str, path: str, method: str
+    user_id: str, token_id: str, path: str, method: str, conn: Connection | None = None
 ):
     segments = path.split("/")
     if len(segments) < 3:
         raise HTTPException(HTTPStatus.FORBIDDEN, "Not an API endpoint.")
 
-    acls = await get_user_access_control_lists(user_id)
+    acls = await get_user_access_control_lists(user_id, conn=conn)
     acl = acls.get_acl_by_token_id(token_id)
     if not acl:
         raise HTTPException(HTTPStatus.FORBIDDEN, "Invalid token id.")
@@ -359,3 +527,28 @@ def url_for_interceptor(original_method):
 # Upgraded extensions modify the path.
 # This interceptor ensures that the path is normalized.
 Request.url_for = url_for_interceptor(Request.url_for)  # type: ignore[method-assign]
+
+
+async def check_admin_ui() -> None:
+    if not settings.lnbits_admin_ui:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="Admin UI is disabled."
+        )
+
+
+async def check_extension_builder(
+    user: Annotated[User, Depends(check_user_exists)],
+) -> None:
+    if not settings.lnbits_extensions_builder_activate_non_admins and not user.admin:
+        raise HTTPException(
+            HTTPStatus.FORBIDDEN,
+            "Extension Builder is disabled for non admin users.",
+        )
+
+
+async def check_first_install():
+    if not settings.first_install:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Super user account has already been configured.",
+        )

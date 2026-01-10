@@ -4,7 +4,7 @@ from typing import Any
 from uuid import uuid4
 
 from lnbits.core.crud.extensions import get_user_active_extensions_ids
-from lnbits.core.crud.wallets import get_wallets
+from lnbits.core.crud.wallets import create_wallet, get_wallets
 from lnbits.core.db import db
 from lnbits.core.models import UserAcls
 from lnbits.db import Connection, Filters, Page
@@ -30,9 +30,9 @@ async def create_account(
     return account
 
 
-async def update_account(account: Account) -> Account:
+async def update_account(account: Account, conn: Connection | None = None) -> Account:
     account.updated_at = datetime.now(timezone.utc)
-    await db.update("accounts", account)
+    await (conn or db).update("accounts", account)
     return account
 
 
@@ -89,6 +89,7 @@ async def get_accounts(
         filters=filters,
         model=AccountOverview,
         group_by=["accounts.id"],
+        table_name="accounts",
     )
 
 
@@ -170,17 +171,24 @@ async def get_account_by_username_or_email(
 
 
 async def get_user(user_id: str, conn: Connection | None = None) -> User | None:
-    account = await get_account(user_id, conn)
-    if not account:
-        return None
-    return await get_user_from_account(account, conn)
+    async with db.reuse_conn(conn) if conn else db.connect() as conn:
+        account = await get_account(user_id, conn=conn)
+        if not account:
+            return None
+        return await get_user_from_account(account, conn=conn)
 
 
 async def get_user_from_account(
     account: Account, conn: Connection | None = None
 ) -> User | None:
-    extensions = await get_user_active_extensions_ids(account.id, conn)
-    wallets = await get_wallets(account.id, False, conn=conn)
+    async with db.reuse_conn(conn) if conn else db.connect() as conn:
+        extensions = await get_user_active_extensions_ids(account.id, conn=conn)
+        wallets = await get_wallets(account.id, deleted=False, conn=conn)
+
+        if len(wallets) == 0:
+            wallet = await create_wallet(user_id=account.id, conn=conn)
+            wallets.append(wallet)
+
     return User(
         id=account.id,
         email=account.email,
@@ -199,9 +207,11 @@ async def get_user_from_account(
     )
 
 
-async def update_user_access_control_list(user_acls: UserAcls):
+async def update_user_access_control_list(
+    user_acls: UserAcls, conn: Connection | None = None
+):
     user_acls.updated_at = datetime.now(timezone.utc)
-    await db.update("accounts", user_acls)
+    await (conn or db).update("accounts", user_acls)
 
 
 async def get_user_access_control_lists(

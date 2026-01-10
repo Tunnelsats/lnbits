@@ -8,13 +8,17 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from lnbits.core.models import (
-    BaseWallet,
     ConversionData,
     CreateWallet,
     User,
     Wallet,
 )
-from lnbits.decorators import check_user_exists
+from lnbits.core.models.users import AccountId
+from lnbits.decorators import (
+    check_account_exists,
+    check_account_id_exists,
+    check_user_exists,
+)
 from lnbits.settings import settings
 from lnbits.utils.exchange_rates import (
     allowed_currencies,
@@ -39,7 +43,9 @@ async def health() -> dict:
 
 
 @api_router.get("/api/v1/status", status_code=HTTPStatus.OK)
-async def health_check(user: User = Depends(check_user_exists)) -> dict:
+async def health_check(
+    account_id: AccountId = Depends(check_account_id_exists),
+) -> dict:
     stat: dict[str, Any] = {
         "server_time": int(time()),
         "up_time": settings.lnbits_server_up_time,
@@ -47,7 +53,7 @@ async def health_check(user: User = Depends(check_user_exists)) -> dict:
     }
 
     stat["version"] = settings.version
-    if not user.admin:
+    if not account_id.is_admin_id:
         return stat
 
     funding_source = get_funding_source()
@@ -64,7 +70,6 @@ async def health_check(user: User = Depends(check_user_exists)) -> dict:
     "/api/v1/wallets",
     name="Wallets",
     description="Get basic info for all of user's wallets.",
-    response_model=list[BaseWallet],
 )
 async def api_wallets(user: User = Depends(check_user_exists)) -> list[Wallet]:
     return user.wallets
@@ -78,7 +83,7 @@ async def api_create_account(data: CreateWallet) -> Wallet:
 
 @api_router.get(
     "/api/v1/rate/history",
-    dependencies=[Depends(check_user_exists)],
+    dependencies=[Depends(check_account_exists)],
 )
 async def api_exchange_rate_history() -> list[dict]:
     return settings.lnbits_exchange_rate_history

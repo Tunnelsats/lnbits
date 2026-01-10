@@ -108,7 +108,8 @@ class OpenNodeWallet(Wallet):
 
         if r.is_error:
             error_message = r.json()["message"]
-            return PaymentResponse(ok=False, error_message=error_message)
+            logger.warning(error_message)
+            return PaymentResponse(ok=None, error_message=error_message)
 
         data = r.json()["data"]
         checking_id = data["id"]
@@ -123,7 +124,7 @@ class OpenNodeWallet(Wallet):
         if r.is_error:
             return PaymentPendingStatus()
         data = r.json()["data"]
-        statuses = {"processing": None, "paid": True, "unpaid": None}
+        statuses = {"processing": None, "paid": True, "unpaid": None, "expired": False}
         return PaymentStatus(statuses[data.get("status")])
 
     async def get_payment_status(self, checking_id: str) -> PaymentStatus:

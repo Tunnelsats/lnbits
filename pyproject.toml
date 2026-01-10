@@ -1,6 +1,6 @@
 [project]
 name = "lnbits"
-version = "1.3.1"
+version = "1.4.0"
 requires-python = ">=3.10,<3.13"
 description = "LNbits, free and open-source Lightning wallet and accounts system."
 authors = [{ name = "Alan Bits", email = "alan@lnbits.com" }]
@@ -41,10 +41,6 @@ dependencies = [
     "fastapi-sso==0.18.0",
     # needed for boltz, lnurldevice, watchonly extensions
     "embit==0.8.0",
-    # needed for lnurlp, nostrclient, nostrmarket
-    "secp256k1==0.14.0",
-    # keep for backwards compatibility with lnurlp
-    "environs==14.2.0",
     # needed for scheduler extension
     "python-crontab==3.2.0",
     "pynostr==0.6.2",
@@ -53,6 +49,8 @@ dependencies = [
     "nostr-sdk==0.42.1",
     "bcrypt==4.3.0",
     "jsonpath-ng==1.7.0",
+    "pillow>=12.0.0",
+    "python-dotenv>=1.2.1",
 ]
 
 [project.scripts]
@@ -64,10 +62,10 @@ breez = ["breez-sdk==0.8.0", "breez-sdk-liquid==0.9.1"]
 liquid = ["wallycore==1.4.0"]
 migration = ["psycopg2-binary==2.9.10"]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
   "black>=25.1.0,<26.0.0",
-  "mypy>=1.11.2,<2.0.0",
+  "mypy==1.17.1",
   "types-protobuf>=6.30.2.20250516,<7.0.0",
   "pre-commit>=4.2.0,<5.0.0",
   "openapi-spec-validator>=0.7.1,<1.0.0",
@@ -221,7 +219,8 @@ extend-exclude = [
 select = ["F", "E", "W", "I", "A", "C", "N", "UP", "RUF", "B", "S"]
 # UP007: pyupgrade: use X | Y instead of Optional. (python3.10)
 # RUF012: mutable-class-default
-ignore = ["RUF012"]
+# RUF043: pytest-raises-ambiguous-pattern (RUF043)
+ignore = ["RUF012", "RUF043"]
 
 # Allow autofix for all enabled rules (when `--fix`) is provided.
 fixable = ["ALL"]

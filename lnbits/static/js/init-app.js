@@ -1,224 +1,135 @@
+const quasarConfig = {
+  config: {
+    loading: {
+      spinner: Quasar.QSpinnerBars
+    },
+    table: {
+      rowsPerPageOptions: [5, 10, 20, 50, 100, 200, 500, 0]
+    }
+  }
+}
+
 const DynamicComponent = {
-  props: {
-    fetchUrl: {
-      type: String,
-      required: true
-    },
-    scripts: {
-      type: Array,
-      default: () => []
-    }
-  },
-  data() {
-    return {
-      keys: []
-    }
-  },
-  async mounted() {
-    await this.loadDynamicContent()
-  },
-  methods: {
-    async loadScript(src) {
-      return new Promise((resolve, reject) => {
-        const existingScript = document.querySelector(`script[src="${src}"]`)
-        if (existingScript) {
-          existingScript.remove()
-        }
-        const script = document.createElement('script')
-        script.src = src
-        script.async = true
-        script.onload = resolve
-        script.onerror = () =>
-          reject(new Error(`Failed to load script: ${src}`))
-        document.head.appendChild(script)
+  async created() {
+    const name = this.$route.path.split('/')[1]
+    const path = `/${name}/`
+    const routesPath = `/${name}/static/routes.json`
+    if (this.$router.getRoutes().some(r => r.path === path)) return
+    if (this.$route.fullPath.startsWith('/extensions/builder/preview')) return
+    fetch(routesPath)
+      .then(async res => {
+        if (!res.ok) throw new Error('No dynamic routes found')
+        const routes = await res.json()
+        routes.forEach(r => {
+          console.log('Adding dynamic route:', r.path)
+          window.router.addRoute({
+            path: r.path,
+            name: r.name,
+            component: async () => {
+              await LNbits.utils.loadTemplate(r.template)
+              await LNbits.utils.loadScript(r.component)
+              return window[r.name]
+            }
+          })
+          window.router.push(this.$route.fullPath)
+        })
       })
-    },
-    async loadDynamicContent() {
-      this.$q.loading.show()
-      try {
-        const cleanUrl = this.fetchUrl.split('#')[0]
-        //grab page content, need to be before loading scripts
-        const response = await fetch(cleanUrl, {
-          credentials: 'include',
-          headers: {
-            Accept: 'text/html',
-            'X-Requested-With': 'XMLHttpRequest'
-          }
-        })
-
-        const html = await response.text()
-
-        // load window variables
-        const parser = new DOMParser()
-        const htmlDocument = parser.parseFromString(html, 'text/html')
-        const inlineScript = htmlDocument.querySelector('#window-vars-script')
-        if (inlineScript) {
-          new Function(inlineScript.innerHTML)() // Execute the script
+      .catch(() => {
+        let route = RENDERED_ROUTE
+        // append trailing slash only on the root path `/path` -> `/path/`
+        if (route.split('/').length === 2) route += '/'
+        if (route !== this.$route.path) {
+          console.log('Redirecting to non-vue route:', this.$route.fullPath)
+          window.location = this.$route.fullPath
+          return
         }
-
-        //load scripts defined in the route
-        await this.loadScript('/static/js/base.js')
-        for (const script of this.scripts) {
-          await this.loadScript(script)
-        }
-
-        //housecleaning, remove old component
-        const previousRouteName =
-          this.$router.currentRoute.value.meta.previousRouteName
-        if (
-          previousRouteName &&
-          window.app._context.components[previousRouteName]
-        ) {
-          delete window.app._context.components[previousRouteName]
-        }
-        //load component logic
-        const logicKey = `${this.$route.name}PageLogic`
-        const componentLogic = window[logicKey]
-
-        if (!componentLogic) {
-          throw new Error(
-            `Component logic '${logicKey}' not found. Ensure it is defined in the script.`
-          )
-        }
-
-        //Add mixins
-        componentLogic.mixins = componentLogic.mixins || []
-        if (window.windowMixin) {
-          componentLogic.mixins.push(window.windowMixin)
-        }
-
-        //Build component
-        window.app.component(this.$route.name, {
-          ...componentLogic,
-          template: html // Use the fetched HTML as the template
-        })
-        delete window[logicKey] //dont need this anymore
-        this.$forceUpdate()
-      } catch (error) {
-        console.error('Error loading dynamic content:', error)
-      } finally {
-        this.$q.loading.hide()
-      }
-    }
-  },
-  watch: {
-    $route(to, from) {
-      const validRouteNames = routes.map(route => route.name)
-      if (validRouteNames.includes(to.name)) {
-        this.$router.currentRoute.value.meta.previousRouteName = from.name
-        this.loadDynamicContent()
-      } else {
-        console.log(
-          `Route '${to.name}' is not valid. Leave this one to Fastapi.`
-        )
-      }
-    }
-  },
-  template: `
-      <component :is="$route.name"></component>
-  `
+      })
+  }
 }
 
 const routes = [
   {
-    path: '/wallet',
-    name: 'Wallet',
-    component: DynamicComponent,
-    props: route => {
-      let fetchUrl = '/wallet'
-      if (Object.keys(route.query).length > 0) {
-        fetchUrl += '?'
-        for (const [key, value] of Object.entries(route.query)) {
-          fetchUrl += `${key}=${value}&`
-        }
-        fetchUrl = fetchUrl.slice(0, -1) // remove last &
-      }
-      return {
-        fetchUrl,
-        scripts: ['/static/js/wallet.js']
-      }
-    }
+    path: '/node',
+    name: 'Node',
+    component: PageNode
   },
   {
-    path: '/admin',
-    name: 'Admin',
-    component: DynamicComponent,
-    props: {
-      fetchUrl: '/admin',
-      scripts: ['/static/js/admin.js']
-    }
-  },
-  {
-    path: '/users',
-    name: 'Users',
-    component: DynamicComponent,
-    props: {
-      fetchUrl: '/users',
-      scripts: ['/static/js/users.js']
-    }
-  },
-  {
-    path: '/audit',
-    name: 'Audit',
-    component: DynamicComponent,
-    props: {
-      fetchUrl: '/audit',
-      scripts: ['/static/js/audit.js']
-    }
+    path: '/node/public',
+    name: 'NodePublic',
+    component: PageNodePublic
   },
   {
     path: '/payments',
     name: 'Payments',
-    component: DynamicComponent,
-    props: {
-      fetchUrl: '/payments',
-      scripts: ['/static/js/payments.js']
+    component: PagePayments
+  },
+  {
+    path: '/audit',
+    name: 'Audit',
+    component: PageAudit
+  },
+  {
+    path: '/wallet',
+    redirect: to => {
+      const walletId =
+        window.g?.lastActiveWallet || window.g?.user?.wallets[0].id
+      return `/wallet/${to.query.wal || walletId || 'default'}`
     }
   },
   {
-    path: '/extensions',
-    name: 'Extensions',
-    component: DynamicComponent,
-    props: {
-      fetchUrl: '/extensions',
-      scripts: ['/static/js/extensions.js']
-    }
-  },
-  {
-    path: '/extensions/builder',
-    name: 'ExtensionsBuilder',
-    component: DynamicComponent,
-    props: {
-      fetchUrl: '/extensions/builder',
-      scripts: ['/static/js/extensions_builder.js']
-    }
-  },
-  {
-    path: '/account',
-    name: 'Account',
-    component: DynamicComponent,
-    props: {
-      fetchUrl: '/account',
-      scripts: ['/static/js/account.js']
-    }
+    path: '/wallet/:id',
+    name: 'Wallet',
+    component: PageWallet
   },
   {
     path: '/wallets',
     name: 'Wallets',
-    component: DynamicComponent,
-    props: {
-      fetchUrl: '/wallets',
-      scripts: ['/static/js/wallets.js']
-    }
+    component: PageWallets
   },
   {
-    path: '/node',
-    name: 'Node',
-    component: DynamicComponent,
-    props: {
-      fetchUrl: '/node',
-      scripts: ['/static/js/node.js']
-    }
+    path: '/users',
+    name: 'Users',
+    component: PageUsers
+  },
+  {
+    path: '/admin',
+    name: 'Admin',
+    component: PageAdmin
+  },
+  {
+    path: '/account',
+    name: 'Account',
+    component: PageAccount
+  },
+  {
+    path: '/extensions/builder',
+    name: 'ExtensionsBuilder',
+    component: PageExtensionBuilder
+  },
+  {
+    path: '/extensions',
+    name: 'Extensions',
+    component: PageExtensions
+  },
+  {
+    path: '/first_install',
+    name: 'FirstInstall',
+    component: PageFirstInstall
+  },
+  {
+    path: '/',
+    name: 'PageHome',
+    component: PageHome
+  },
+  {
+    path: '/error',
+    name: 'PageError',
+    component: PageError
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'DynamicComponent',
+    component: DynamicComponent
   }
 ]
 
@@ -227,27 +138,34 @@ window.router = VueRouter.createRouter({
   routes
 })
 
+// BACKWARDS compatibility extensions
+window.LOCALE = window.g.locale
+
+window.i18n = new VueI18n.createI18n({
+  locale: window.g.locale,
+  fallbackLocale: 'en',
+  messages: window.localisation
+})
+
 window.app.mixin({
-  computed: {
-    isVueRoute() {
-      const currentPath = window.location.pathname
-      const matchedRoute = window.router.resolve(currentPath)
-      const isVueRoute = matchedRoute?.matched?.length > 0
-      return isVueRoute
+  data() {
+    return {
+      api: window._lnbitsApi,
+      utils: window._lnbitsUtils,
+      g: window.g,
+      ...WINDOW_SETTINGS
     }
+  },
+  // backwards compatibility for extensions, should not be used in the future
+  methods: {
+    copyText: window._lnbitsUtils.copyText,
+    formatBalance: window._lnbitsUtils.formatBalance
   }
 })
 
 window.app.use(VueQrcodeReader)
-window.app.use(Quasar, {
-  config: {
-    loading: {
-      spinner: Quasar.QSpinnerBars
-    }
-  }
-})
+window.app.use(Quasar, quasarConfig)
+
 window.app.use(window.i18n)
-window.app.provide('g', g)
 window.app.use(window.router)
-window.app.component('DynamicComponent', DynamicComponent)
 window.app.mount('#vue')

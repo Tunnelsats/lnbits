@@ -18,6 +18,7 @@ from pydantic.schema import field_schema
 from lnbits.jinja2_templating import Jinja2Templates
 from lnbits.settings import settings
 from lnbits.utils.crypto import AESCipher
+from lnbits.utils.exchange_rates import currencies
 
 from .db import FilterModel
 
@@ -67,9 +68,10 @@ def template_renderer(additional_folders: list | None = None) -> Jinja2Templates
         folders.extend(additional_folders)
     t = Jinja2Templates(loader=jinja2.FileSystemLoader(folders))
     t.env.globals["static_url_for"] = static_url_for
+    t.env.globals["normalize_path"] = normalize_path
 
     window_settings = {
-        "AD_SPACE": settings.lnbits_ad_space.split(","),
+        "AD_SPACE": settings.lnbits_ad_space,
         "AD_SPACE_ENABLED": settings.lnbits_ad_space_enabled,
         "AD_SPACE_TITLE": settings.lnbits_ad_space_title,
         "EXTENSIONS": list(settings.lnbits_installed_extensions_ids),
@@ -90,6 +92,7 @@ def template_renderer(additional_folders: list | None = None) -> Jinja2Templates
         "LNBITS_NODE_UI": settings.lnbits_node_ui and settings.has_nodemanager,
         "LNBITS_NODE_UI_AVAILABLE": settings.has_nodemanager,
         "LNBITS_QR_LOGO": settings.lnbits_qr_logo,
+        "LNBITS_APPLE_TOUCH_ICON": settings.lnbits_apple_touch_icon,
         "LNBITS_SERVICE_FEE": settings.lnbits_service_fee,
         "LNBITS_SERVICE_FEE_MAX": settings.lnbits_service_fee_max,
         "LNBITS_SERVICE_FEE_WALLET": settings.lnbits_service_fee_wallet,
@@ -97,15 +100,21 @@ def template_renderer(additional_folders: list | None = None) -> Jinja2Templates
         "LNBITS_THEME_OPTIONS": settings.lnbits_theme_options,
         "LNBITS_VERSION": settings.version,
         "USE_CUSTOM_LOGO": settings.lnbits_custom_logo,
-        "USE_DEFAULT_REACTION": settings.lnbits_default_reaction,
-        "USE_DEFAULT_THEME": settings.lnbits_default_theme,
-        "USE_DEFAULT_BORDER": settings.lnbits_default_border,
-        "USE_DEFAULT_GRADIENT": settings.lnbits_default_gradient,
-        "USE_DEFAULT_BGIMAGE": settings.lnbits_default_bgimage,
+        "LNBITS_DEFAULT_REACTION": settings.lnbits_default_reaction,
+        "LNBITS_DEFAULT_THEME": settings.lnbits_default_theme,
+        "LNBITS_DEFAULT_BORDER": settings.lnbits_default_border,
+        "LNBITS_DEFAULT_GRADIENT": settings.lnbits_default_gradient,
+        "LNBITS_DEFAULT_BGIMAGE": settings.lnbits_default_bgimage,
         "VOIDWALLET": settings.lnbits_backend_wallet_class == "VoidWallet",
         "WEBPUSH_PUBKEY": settings.lnbits_webpush_pubkey,
         "LNBITS_DENOMINATION": settings.lnbits_denomination,
         "has_holdinvoice": settings.has_holdinvoice,
+        "LNBITS_NOSTR_CONFIGURED": settings.is_nostr_notifications_configured(),
+        "LNBITS_TELEGRAM_CONFIGURED": settings.is_telegram_notifications_configured(),
+        "LNBITS_EXT_BUILDER": settings.lnbits_extensions_builder_activate_non_admins,
+        "LNBITS_CURRENCIES": list(currencies.keys()),
+        "LNBITS_ALLOWED_CURRENCIES": settings.lnbits_allowed_currencies,
+        "CACHE_KEY": settings.server_startup_time,
     }
 
     t.env.globals["WINDOW_SETTINGS"] = window_settings
@@ -196,6 +205,11 @@ def is_valid_email_address(email: str) -> bool:
 def is_valid_username(username: str) -> bool:
     username_regex = r"(?=[a-zA-Z0-9._]{2,20}$)(?!.*[_.]{2})[^_.].*[^_.]"
     return re.fullmatch(username_regex, username) is not None
+
+
+def is_valid_label(label: str) -> bool:
+    label_regex = r"([A-Za-z0-9 ._-]{1,100}$)"
+    return re.fullmatch(label_regex, label) is not None
 
 
 def is_valid_external_id(external_id: str) -> bool:
@@ -353,17 +367,6 @@ def normalize_path(path: str | None) -> str:
     return "/" + "/".join(path_segments(path))
 
 
-def safe_upload_file_path(filename: str, directory: str = "images") -> Path:
-    image_folder = Path(settings.lnbits_data_folder, directory)
-    file_path = image_folder / filename
-    # Prevent dir traversal attack
-    if image_folder.resolve() not in file_path.resolve().parents:
-        raise ValueError("Unsafe filename.")
-    # Prevent filename with subdirectories
-    file_path = image_folder / filename.split("/")[-1]
-    return file_path.resolve()
-
-
 def normalize_endpoint(endpoint: str, add_proto=True) -> str:
     endpoint = endpoint[:-1] if endpoint.endswith("/") else endpoint
     if add_proto:
@@ -397,3 +400,11 @@ def is_snake_case(v: str) -> bool:
 
 def lowercase_first_letter(s: str) -> str:
     return s[:1].lower() + s[1:] if s else s
+
+
+def sha256s(value: str) -> str:
+    """
+    SHA256 applied on a string value.
+    Returns the hex as a string.
+    """
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()

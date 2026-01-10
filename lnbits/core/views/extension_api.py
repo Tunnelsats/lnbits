@@ -7,9 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
 from lnbits.core.crud.extensions import get_user_extensions
+from lnbits.core.crud.wallets import get_wallets_ids
+from lnbits.core.db import db
 from lnbits.core.models import (
     SimpleStatus,
-    User,
 )
 from lnbits.core.models.extensions import (
     CreateExtension,
@@ -23,6 +24,7 @@ from lnbits.core.models.extensions import (
     UserExtension,
     UserExtensionInfo,
 )
+from lnbits.core.models.users import Account, AccountId
 from lnbits.core.services import check_transaction_status, create_invoice
 from lnbits.core.services.extensions import (
     activate_extension,
@@ -33,15 +35,18 @@ from lnbits.core.services.extensions import (
     uninstall_extension,
 )
 from lnbits.decorators import (
+    check_account_exists,
+    check_account_id_exists,
     check_admin,
-    check_user_exists,
 )
+from lnbits.settings import settings
 
 from ..crud import (
     create_user_extension,
     delete_dbversion,
     drop_extension_db,
     get_db_version,
+    get_db_versions,
     get_installed_extension,
     get_installed_extensions,
     get_user_extension,
@@ -140,9 +145,10 @@ async def api_extension_details(
 async def api_update_pay_to_enable(
     ext_id: str,
     data: PayToEnableInfo,
-    user: User = Depends(check_admin),
+    account: Account = Depends(check_admin),
 ) -> SimpleStatus:
-    if data.wallet not in user.wallet_ids:
+    user_wallet_ids = await get_wallets_ids(account.id, deleted=False)
+    if data.wallet not in user_wallet_ids:
         raise HTTPException(
             HTTPStatus.BAD_REQUEST, "Wallet does not belong to this admin user."
         )
@@ -161,7 +167,7 @@ async def api_update_pay_to_enable(
 
 @extension_router.put("/{ext_id}/enable")
 async def api_enable_extension(
-    ext_id: str, user: User = Depends(check_user_exists)
+    ext_id: str, account_id: AccountId = Depends(check_account_id_exists)
 ) -> SimpleStatus:
     if ext_id not in [e.code for e in await get_valid_extensions()]:
         raise HTTPException(
@@ -175,12 +181,12 @@ async def api_enable_extension(
     if not ext.active:
         raise ValueError(f"Extension '{ext_id}' is not activated.")
 
-    user_ext = await get_user_extension(user.id, ext_id)
+    user_ext = await get_user_extension(account_id.id, ext_id)
     if not user_ext:
-        user_ext = UserExtension(user=user.id, extension=ext_id, active=False)
+        user_ext = UserExtension(user=account_id.id, extension=ext_id, active=False)
         await create_user_extension(user_ext)
 
-    if user.admin or not ext.requires_payment:
+    if account_id.is_admin_id or not ext.requires_payment:
         user_ext.active = True
         await update_user_extension(user_ext)
         return SimpleStatus(success=True, message=f"Extension '{ext_id}' enabled.")
@@ -217,13 +223,13 @@ async def api_enable_extension(
 
 @extension_router.put("/{ext_id}/disable")
 async def api_disable_extension(
-    ext_id: str, user: User = Depends(check_user_exists)
+    ext_id: str, account_id: AccountId = Depends(check_account_id_exists)
 ) -> SimpleStatus:
     if ext_id not in [e.code for e in await get_valid_extensions()]:
         raise HTTPException(
             HTTPStatus.BAD_REQUEST, f"Extension '{ext_id}' doesn't exist."
         )
-    user_ext = await get_user_extension(user.id, ext_id)
+    user_ext = await get_user_extension(account_id.id, ext_id)
     if not user_ext or not user_ext.active:
         return SimpleStatus(
             success=True, message=f"Extension '{ext_id}' already disabled."
@@ -374,7 +380,9 @@ async def get_pay_to_install_invoice(
 
 @extension_router.put("/{ext_id}/invoice/enable")
 async def get_pay_to_enable_invoice(
-    ext_id: str, data: PayToEnableInfo, user: User = Depends(check_user_exists)
+    ext_id: str,
+    data: PayToEnableInfo,
+    account_id: AccountId = Depends(check_account_id_exists),
 ):
     if not data.amount or data.amount <= 0:
         raise HTTPException(
@@ -420,9 +428,9 @@ async def get_pay_to_enable_invoice(
         memo=f"Enable '{ext.name}' extension.",
     )
 
-    user_ext = await get_user_extension(user.id, ext_id)
+    user_ext = await get_user_extension(account_id.id, ext_id)
     if not user_ext:
-        user_ext = UserExtension(user=user.id, extension=ext_id, active=False)
+        user_ext = UserExtension(user=account_id.id, extension=ext_id, active=False)
         await create_user_extension(user_ext)
     user_ext_info = user_ext.extra if user_ext.extra else UserExtensionInfo()
     user_ext_info.payment_hash_to_enable = payment.payment_hash
@@ -433,7 +441,7 @@ async def get_pay_to_enable_invoice(
 
 @extension_router.get(
     "/release/{org}/{repo}/{tag_name}",
-    dependencies=[Depends(check_user_exists)],
+    dependencies=[Depends(check_account_exists)],
 )
 async def get_extension_release(org: str, repo: str, tag_name: str):
     try:
@@ -454,15 +462,18 @@ async def get_extension_release(org: str, repo: str, tag_name: str):
 
 @extension_router.get("")
 async def api_get_user_extensions(
-    user: User = Depends(check_user_exists),
+    account_id: AccountId = Depends(check_account_id_exists),
 ) -> list[Extension]:
-
-    user_extensions_ids = [ue.extension for ue in await get_user_extensions(user.id)]
-    return [
-        ext
-        for ext in await get_valid_extensions(False)
-        if ext.code in user_extensions_ids
-    ]
+    async with db.connect() as conn:
+        user_extensions_ids = [
+            ue.extension for ue in await get_user_extensions(account_id.id, conn=conn)
+        ]
+        valid_extensions = [
+            ext
+            for ext in await get_valid_extensions(False, conn=conn)
+            if ext.code in user_extensions_ids
+        ]
+        return valid_extensions
 
 
 @extension_router.delete(
@@ -492,3 +503,89 @@ async def delete_extension_db(ext_id: str):
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail=f"Cannot delete data for extension '{ext_id}'",
         ) from exc
+
+
+# TODO: create a response model for this
+@extension_router.get("/all")
+async def extensions(account_id: AccountId = Depends(check_account_id_exists)):
+    async with db.connect() as conn:
+        installed_exts: list[InstallableExtension] = await get_installed_extensions(
+            conn=conn
+        )
+        all_ext_ids = [ext.code for ext in await get_valid_extensions(conn=conn)]
+        inactive_extensions = [
+            e.id for e in await get_installed_extensions(active=False, conn=conn)
+        ]
+        db_versions = await get_db_versions(conn=conn)
+
+    installed_exts_ids = [e.id for e in installed_exts]
+
+    installable_exts = await InstallableExtension.get_installable_extensions(
+        post_refresh_cache=account_id.is_admin_id
+    )
+    installable_exts_ids = [e.id for e in installable_exts]
+    installable_exts += [e for e in installed_exts if e.id not in installable_exts_ids]
+
+    for e in installable_exts:
+        installed_ext = next((ie for ie in installed_exts if e.id == ie.id), None)
+        if installed_ext and installed_ext.meta:
+            installed_release = installed_ext.meta.installed_release
+            if installed_ext.meta.pay_to_enable and not account_id.is_admin_id:
+                # not a security leak, but better not to share the wallet id
+                installed_ext.meta.pay_to_enable.wallet = None
+            pay_to_enable = installed_ext.meta.pay_to_enable
+
+            if e.meta:
+                e.meta.installed_release = installed_release
+                e.meta.pay_to_enable = pay_to_enable
+            else:
+                e.meta = ExtensionMeta(
+                    installed_release=installed_release,
+                    pay_to_enable=pay_to_enable,
+                )
+            # use the installed extension values
+            e.name = installed_ext.name
+            e.short_description = installed_ext.short_description
+            e.icon = installed_ext.icon
+
+    extension_data = [
+        {
+            "id": ext.id,
+            "name": ext.name,
+            "icon": ext.icon,
+            "shortDescription": ext.short_description,
+            "stars": ext.stars,
+            "isFeatured": ext.meta.featured if ext.meta else False,
+            "dependencies": ext.meta.dependencies if ext.meta else "",
+            "isInstalled": ext.id in installed_exts_ids,
+            "hasDatabaseTables": next(
+                (True for version in db_versions if version.db == ext.id), False
+            ),
+            "isAvailable": ext.id in all_ext_ids,
+            "isAdminOnly": ext.id in settings.lnbits_admin_extensions,
+            "isActive": ext.id not in inactive_extensions,
+            "latestRelease": (
+                dict(ext.meta.latest_release)
+                if ext.meta and ext.meta.latest_release
+                else None
+            ),
+            "hasPaidRelease": ext.meta.has_paid_release if ext.meta else False,
+            "hasFreeRelease": ext.meta.has_free_release if ext.meta else False,
+            "paidFeatures": ext.meta.paid_features if ext.meta else False,
+            "installedRelease": (
+                dict(ext.meta.installed_release)
+                if ext.meta and ext.meta.installed_release
+                else None
+            ),
+            "payToEnable": (
+                dict(ext.meta.pay_to_enable)
+                if ext.meta and ext.meta.pay_to_enable
+                else {}
+            ),
+            "isPaymentRequired": ext.requires_payment,
+            "inProgress": False,
+            "selectedForUpdate": False,
+        }
+        for ext in installable_exts
+    ]
+    return extension_data

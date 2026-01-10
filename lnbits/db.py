@@ -130,6 +130,12 @@ class Compat:
             return "BIGINT"
         return "INT"
 
+    @property
+    def blob(self) -> str:
+        if self.type in {POSTGRES}:
+            return "BYTEA"
+        return "BLOB"
+
     def timestamp_placeholder(self, key: str) -> str:
         return compat_timestamp_placeholder(key)
 
@@ -216,18 +222,34 @@ class Connection(Compat):
         filters: Filters | None = None,
         model: type[TModel] | None = None,
         group_by: list[str] | None = None,
+        table_name: str | None = None,
     ) -> Page[TModel]:
+        """
+        Parameters:
+            query: The main SQL query string to execute for data retrieval.
+            where: list of additional WHERE clause conditions to filter results.
+            values: dictionary of parameter values to be used in the SQL query.
+            filters: object for advanced filtering, sorting, and pagination logic.
+            model: pydantic model type to map query results into model instances.
+            group_by: list of column names to group results by in the SQL query.
+            table_name: if provided some optimisations can be applied.
+        """
+
         if not filters:
             filters = Filters()
+
+        if table_name:
+            if not _valid_sql_name(table_name):
+                raise ValueError(f"Invalid table name: '{table_name}'.")
+            filters.set_table_name(table_name)
+
         clause = filters.where(where)
         parsed_values = filters.values(values)
 
         group_by_string = ""
         if group_by:
             for field in group_by:
-                if not re.fullmatch(
-                    r"[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?", field
-                ):
+                if not _valid_sql_name(field):
                     raise ValueError("Value for GROUP BY is invalid")
             group_by_string = f"GROUP BY {', '.join(group_by)}"
 
@@ -245,16 +267,17 @@ class Connection(Compat):
         if rows:
             # no need for extra query if no pagination is specified
             if filters.offset or filters.limit:
-                result = await self.execute(
-                    f"""
-                    SELECT COUNT(*) as count FROM (
+                if table_name:
+                    count_query = f"SELECT COUNT(*) as count FROM {table_name} {clause}"  # noqa: S608
+                else:
+                    count_query = f"""SELECT COUNT(*) as count
+                    FROM (
                         {query}
                         {clause}
                         {group_by_string}
-                    ) as count
-                    """,  # noqa: S608
-                    parsed_values,
-                )
+                    ) as count"""  # noqa: S608
+
+                result = await self.execute(count_query, parsed_values)
                 row = result.mappings().first()
                 result.close()
                 count = int(row.get("count", 0))
@@ -387,9 +410,12 @@ class Database(Compat):
         filters: Filters | None = None,
         model: type[TModel] | None = None,
         group_by: list[str] | None = None,
+        table_name: str | None = None,
     ) -> Page[TModel]:
         async with self.connect() as conn:
-            return await conn.fetch_page(query, where, values, filters, model, group_by)
+            return await conn.fetch_page(
+                query, where, values, filters, model, group_by, table_name
+            )
 
     async def execute(self, query: str, values: dict | None = None):
         async with self.connect() as conn:
@@ -425,6 +451,8 @@ class Operator(Enum):
     INCLUDE = "in"
     EXCLUDE = "ex"
     LIKE = "like"
+    EVERY = "every"
+    ANY = "any"
 
     @property
     def as_sql(self):
@@ -444,7 +472,7 @@ class Operator(Enum):
             return ">="
         elif self == Operator.LE:
             return "<="
-        elif self == Operator.LIKE:
+        elif self in {Operator.LIKE, Operator.EVERY, Operator.ANY}:
             return "LIKE"
         else:
             raise ValueError("Unknown SQL Operator")
@@ -466,6 +494,7 @@ class Page(BaseModel, Generic[T]):
 
 
 class Filter(BaseModel, Generic[TFilterModel]):
+    table_name: str | None = None
     field: str
     op: Operator = Operator.EQ
     model: type[TFilterModel] | None
@@ -475,6 +504,8 @@ class Filter(BaseModel, Generic[TFilterModel]):
     def parse_query(
         cls, key: str, raw_values: list[Any], model: type[TFilterModel], i: int = 0
     ):
+        if i > 1000 or len(raw_values) > 1000:
+            raise ValueError("Too many filter values")
         # Key format:
         # key[operator]
         # e.g. name[eq]
@@ -491,11 +522,14 @@ class Filter(BaseModel, Generic[TFilterModel]):
         if field in model.__fields__:
             compare_field = model.__fields__[field]
             values: dict = {}
-            for raw_value in raw_values:
+            if op in {Operator.EVERY, Operator.ANY, Operator.INCLUDE, Operator.EXCLUDE}:
+                raw_values = [v for rv in raw_values for v in rv.split(",")]
+
+            for index, raw_value in enumerate(raw_values):
                 validated, errors = compare_field.validate(raw_value, {}, loc="none")
                 if errors:
                     raise ValidationError(errors=[errors], model=model)
-                values[f"{field}__{i}"] = validated
+                values[f"{field}__{index}"] = validated
         else:
             raise ValueError("Unknown filter field")
 
@@ -503,15 +537,24 @@ class Filter(BaseModel, Generic[TFilterModel]):
 
     @property
     def statement(self) -> str:
+        prefix = f"{self.table_name}." if self.table_name else ""
         stmt = []
         for key in self.values.keys() if self.values else []:
-            clean_key = key.split("__")[0]
-            if self.model and self.model.__fields__[clean_key].type_ == datetime:
+            if self.model and self.model.__fields__[self.field].type_ == datetime:
                 placeholder = compat_timestamp_placeholder(key)
+                stmt.append(f"{prefix}{self.field} {self.op.as_sql} {placeholder}")
+            if self.op in {Operator.INCLUDE, Operator.EXCLUDE}:
+                stmt.append(f":{key}")
             else:
-                placeholder = f":{key}"
-            stmt.append(f"{clean_key} {self.op.as_sql} {placeholder}")
-        return " OR ".join(stmt)
+                stmt.append(f"{prefix}{self.field} {self.op.as_sql} :{key}")
+
+        if self.op in {Operator.INCLUDE, Operator.EXCLUDE}:
+            statement = f"{prefix}{self.field} {self.op.as_sql} ({', '.join(stmt)})"
+        elif self.op == Operator.EVERY:
+            statement = " AND ".join(stmt)
+        else:
+            statement = " OR ".join(stmt)
+        return f"({statement})"
 
 
 class Filters(BaseModel, Generic[TFilterModel]):
@@ -527,12 +570,13 @@ class Filters(BaseModel, Generic[TFilterModel]):
     search: str | None = None
 
     offset: int | None = None
-    limit: int | None = None
-
+    limit: int | None = 10
     sortby: str | None = None
     direction: Literal["asc", "desc"] | None = None
 
     model: type[TFilterModel] | None = None
+
+    table_name: str | None = None
 
     @root_validator(pre=True)
     def validate_sortby(cls, values):
@@ -548,8 +592,8 @@ class Filters(BaseModel, Generic[TFilterModel]):
 
     def pagination(self) -> str:
         stmt = ""
-        if self.limit:
-            stmt += f"LIMIT {self.limit} "
+        self.limit = self.limit or 10
+        stmt += f"LIMIT {min(1000, self.limit)} "
         if self.offset:
             stmt += f"OFFSET {self.offset}"
         return stmt
@@ -575,7 +619,8 @@ class Filters(BaseModel, Generic[TFilterModel]):
 
     def order_by(self) -> str:
         if self.sortby:
-            return f"ORDER BY {self.sortby} {self.direction or 'asc'}"
+            prefix = f"{self.table_name}." if self.table_name else ""
+            return f"ORDER BY {prefix}{self.sortby} {self.direction or 'asc'}"
         return ""
 
     def values(self, values: dict | None = None) -> dict:
@@ -587,11 +632,25 @@ class Filters(BaseModel, Generic[TFilterModel]):
                     for key, value in page_filter.values.items():
                         if page_filter.op == Operator.LIKE:
                             values[key] = f"%{value}%"
+                        elif page_filter.op in {Operator.EVERY, Operator.ANY}:
+                            values[key] = f"""%"{value}"%"""
                         else:
                             values[key] = value
         if self.search and self.model:
             values["search"] = f"%{self.search.lower()}%"
         return values
+
+    def set_table_name(self, table_name: str) -> None:
+        self.table_name = table_name
+        for page_filter in self.filters:
+            page_filter.table_name = table_name
+
+
+class DbJsonEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, Enum):
+            return o.value
+        return super().default(o)
 
 
 def insert_query(table_name: str, model: BaseModel) -> str:
@@ -648,7 +707,7 @@ def model_to_dict(model: BaseModel) -> dict:
             or type_ is dict
             or get_origin(outertype_) is list
         ):
-            _dict[key] = json.dumps(value)
+            _dict[key] = json.dumps(value, cls=DbJsonEncoder)
             continue
         _dict[key] = value
 
@@ -722,3 +781,11 @@ def _safe_load_json(value: str) -> dict:
         # DB is corrupted if it gets here
         logger.error(f"Failed to decode JSON: '{value}'")
         return {}
+
+
+def _valid_sql_name(name: str) -> bool:
+    """Check if a SQL name is valid (alphanumeric and underscores only)"""
+    return (
+        re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?", name)
+        is not None
+    )

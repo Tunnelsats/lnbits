@@ -1,6 +1,7 @@
 @use 'sass:color';
+@use 'themes';
 
-@each $theme, $colors in $themes {
+@each $theme, $colors in themes.$themes {
   body[data-theme='#{$theme}'] {
     @each $name, $color in $colors {
       @if $name== 'dark' {
@@ -23,6 +24,11 @@
 }
 
 body.gradient-bg {
+  background-image: linear-gradient(to bottom right, #fff, var(--q-primary));
+  background-attachment: fixed;
+}
+
+body.gradient-bg.body--dark {
   background-image: linear-gradient(
     to bottom right,
     var(--q-dark-page),
@@ -57,6 +63,6 @@ body.body--dark {
   .q-drawer {
     --q-dark: #{color.adjust(#1d1d1d, $alpha: -0.7)};
     background-color: var(--q-dark);
-    backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px) brightness(0.8);
   }
 }

@@ -16,6 +16,7 @@ from lnbits.core.crud import (
     get_payment,
     update_payment,
 )
+from lnbits.core.crud.users import get_user_from_account
 from lnbits.core.models import Account, CreateInvoice, PaymentState, User
 from lnbits.core.models.users import UpdateSuperuserPassword
 from lnbits.core.services import create_user_account, update_wallet_balance
@@ -30,6 +31,8 @@ from tests.helpers import (
 )
 
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+
+ADMIN_USER_ID = uuid4().hex
 
 
 @pytest.fixture(scope="session")
@@ -106,15 +109,25 @@ async def user_alan():
     if account:
         await delete_account(account.id)
 
+    yield await new_user("alan")
+
+
+@pytest.fixture(scope="session")
+async def admin_user():
+    username = "admin"
+    account = await get_account_by_username(username)
+    if account:
+        return await get_user_from_account(account)
+
     account = Account(
-        id=uuid4().hex,
-        email="alan@lnbits.com",
-        username="alan",
+        id=ADMIN_USER_ID,
+        email=f"{username}@lnbits.com",
+        username=username,
     )
     account.hash_password("secret1234")
     user = await create_user_account(account)
 
-    yield user
+    return user
 
 
 @pytest.fixture(scope="session")
@@ -299,18 +312,32 @@ async def fake_payments(client, inkey_fresh_headers_to):
     return fake_data, params
 
 
+async def new_user(username: str | None = None) -> User:
+    id_ = uuid4().hex
+    username = username or f"u_{id_[:16]}"
+    account = Account(
+        id=id_,
+        email=f"{username}@lnbits.com",
+        username=username,
+    )
+    account.hash_password("secret1234")
+    user = await create_user_account(account)
+
+    return user
+
+
 def _settings_cleanup(settings: Settings):
     settings.lnbits_allow_new_accounts = True
     settings.lnbits_allowed_users = []
     settings.auth_allowed_methods = AuthMethods.all()
     settings.auth_credetials_update_threshold = 120
-    settings.lnbits_reserve_fee_percent = 1
-    settings.lnbits_reserve_fee_min = 2000
+    settings.lnbits_reserve_fee_percent = 2
+    settings.lnbits_reserve_fee_min = 20000
     settings.lnbits_service_fee = 0
     settings.lnbits_reserve_fee_percent = 0
     settings.lnbits_wallet_limit_daily_max_withdraw = 0
     settings.lnbits_admin_extensions = []
-    settings.lnbits_admin_users = []
+    settings.lnbits_admin_users = [ADMIN_USER_ID]
     settings.lnbits_max_outgoing_payment_amount_sats = 10_000_000_100
     settings.lnbits_max_incoming_payment_amount_sats = 10_000_000_200
     settings.stripe_limits = FiatProviderLimits()
