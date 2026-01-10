@@ -74,13 +74,16 @@ def configure_logger() -> None:
     logger.add(sys.stdout, level=log_level, format=formatter.format)
 
     # IP obfuscation
-    # Access the 'uvicorn.access' logger
+    # Access the 'uvicorn' and 'uvicorn.access' loggers
+    uvicorn_logger = logging.getLogger("uvicorn")
     uvicorn_access_logger = logging.getLogger("uvicorn.access")
 
     # Add the IP hashing filter
+    uvicorn_logger.addFilter(ip_hashing_filter)
     uvicorn_access_logger.addFilter(ip_hashing_filter)
 
-    # Ensure the logger is enabled
+    # Ensure the loggers are enabled
+    uvicorn_logger.disabled = False
     uvicorn_access_logger.disabled = False
 
     if settings.enable_log_to_file:
@@ -137,6 +140,7 @@ class Formatter:
 
 class InterceptHandler(logging.Handler):
     def emit(self, record):
+        ip_hashing_filter(record)
         try:
             level = logger.level(record.levelname).name
         except ValueError:
