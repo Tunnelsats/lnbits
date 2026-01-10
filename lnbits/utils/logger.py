@@ -52,14 +52,18 @@ def hash_ip(ip: str) -> str:
 
 
 def ip_hashing_filter(record: logging.LogRecord) -> bool:
-    ip_pattern = re.compile(r"(\d{1,3}\.){3}\d{1,3}")
+    # IPv4 and IPv6 patterns
+    ipv4_pattern = r"(?:\d{1,3}\.){3}\d{1,3}"
+    ipv6_pattern = r"(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}|:(?::[0-9a-fA-F]{1,4}){1,7}|::"
+    ip_regex = re.compile(f"({ipv4_pattern}|{ipv6_pattern})")
+
     if record.args:
         record.args = tuple(
-            hash_ip(arg) if isinstance(arg, str) and ip_pattern.match(arg) else arg
+            hash_ip(arg) if isinstance(arg, str) and ip_regex.match(arg) else arg
             for arg in record.args
         )
     if record.msg:
-        record.msg = ip_pattern.sub(lambda match: hash_ip(match.group(0)), record.msg)
+        record.msg = ip_regex.sub(lambda match: hash_ip(match.group(0)), record.msg)
     return True
 
 
