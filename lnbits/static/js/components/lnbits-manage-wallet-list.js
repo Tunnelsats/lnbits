@@ -1,6 +1,5 @@
 window.app.component('lnbits-manage-wallet-list', {
   template: '#lnbits-manage-wallet-list',
-  mixins: [window.windowMixin],
   data() {
     return {
       activeWalletId: null
@@ -18,6 +17,13 @@ window.app.component('lnbits-manage-wallet-list', {
       } else {
         this.activeWalletId = null
       }
+    },
+    'g.user.wallets': {
+      handler() {
+        this.paymentEvents()
+      },
+      deep: true,
+      immediate: true
     }
   },
   created() {

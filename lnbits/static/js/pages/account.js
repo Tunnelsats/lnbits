@@ -1,6 +1,5 @@
 window.PageAccount = {
   template: '#page-account',
-  mixins: [window.windowMixin],
   data() {
     return {
       untouchedUser: null,
@@ -10,6 +9,10 @@ window.PageAccount = {
         {
           name: 'bitcoin',
           color: 'deep-orange'
+        },
+        {
+          name: 'classic',
+          color: 'purple'
         },
         {
           name: 'mint',
@@ -40,6 +43,9 @@ window.PageAccount = {
           color: 'pink-3'
         }
       ],
+      defaultSiteCustomisation: {
+        locale: 'en'
+      },
       reactionOptions: [
         'None',
         'confettiBothSides',
@@ -214,26 +220,18 @@ window.PageAccount = {
     }
   },
   methods: {
-    activeLanguage(lang) {
-      return window.i18n.global.locale === lang
-    },
     changeLanguage(newValue) {
       window.i18n.global.locale = newValue
       this.$q.localStorage.set('lnbits.lang', newValue)
     },
     async updateAccount() {
       try {
-        const {data} = await LNbits.api.request(
-          'PUT',
-          '/api/v1/auth/update',
-          null,
-          {
-            user_id: this.g.user.id,
-            username: this.g.user.username,
-            email: this.g.user.email,
-            extra: this.g.user.extra
-          }
-        )
+        const {data} = await LNbits.api.request('PATCH', '/api/v1/auth', null, {
+          user_id: this.g.user.id,
+          username: this.g.user.username,
+          email: this.g.user.email,
+          extra: this.g.user.extra
+        })
         this.untouchedUser = JSON.parse(JSON.stringify(this.g.user))
         this.hasUsername = !!data.username
         Quasar.Notify.create({
@@ -547,30 +545,55 @@ window.PageAccount = {
       if (file) {
         this.uploadAsset(file)
       }
+      e.target.value = null
     },
-    async uploadAsset(file) {
+    onBackgroundImageInput(e) {
+      const file = e.target.files[0]
+      if (file) {
+        this.uploadBackgroundImage(file)
+      }
+      e.target.value = null
+    },
+    async uploadAsset(
+      file,
+      {isPublic = this.assetsUploadToPublic, notifySuccess = true} = {}
+    ) {
       const formData = new FormData()
       formData.append('file', file)
       try {
-        await LNbits.api.request(
+        const {data} = await LNbits.api.request(
           'POST',
-          `/api/v1/assets?public_asset=${this.assetsUploadToPublic}`,
+          `/api/v1/assets?public_asset=${isPublic}`,
           null,
           formData,
           {
             headers: {'Content-Type': 'multipart/form-data'}
           }
         )
-        this.$q.notify({
-          type: 'positive',
-          message: 'Upload successful!',
-          icon: null
-        })
+        if (notifySuccess) {
+          this.$q.notify({
+            type: 'positive',
+            message: 'Upload successful!',
+            icon: null
+          })
+        }
         await this.getUserAssets()
+        return data
       } catch (e) {
         console.warn(e)
         LNbits.utils.notifyApiError(e)
       }
+    },
+    async uploadBackgroundImage(file) {
+      const asset = await this.uploadAsset(file, {
+        isPublic: false,
+        notifySuccess: false
+      })
+      if (!asset) {
+        return
+      }
+      const assetUrl = `${window.location.origin}/api/v1/assets/${asset.id}/thumbnail`
+      await this.siteCustomisationChanged({bgimageChoice: assetUrl})
     },
     async deleteAsset(asset) {
       LNbits.utils
@@ -610,7 +633,7 @@ window.PageAccount = {
       }
     },
     copyAssetLinkToClipboard(asset) {
-      const assetUrl = `${window.location.origin}/api/v1/assets/${asset.id}/binary`
+      const assetUrl = `${window.location.origin}/api/v1/assets/${asset.id}/data`
       this.utils.copyText(assetUrl)
     },
     addUserLabel() {
@@ -681,6 +704,38 @@ window.PageAccount = {
             l => l.name !== label.name
           )
         })
+    },
+
+    async siteCustomisationChanged(options = {}) {
+      try {
+        Object.entries(options || {}).forEach(([key, value]) => {
+          if (key in this.g) {
+            this.g[key] = value
+          }
+        })
+        await LNbits.api.updateUiCustomization(options)
+        this.$q.notify({
+          type: 'positive',
+          message: 'UI Customization updated.'
+        })
+      } catch (e) {
+        LNbits.utils.notifyApiError(e)
+      }
+    },
+    resetThemeDefaults() {
+      const defaults = {
+        themeChoice: this.g.settings.defaultTheme,
+        borderChoice: this.g.settings.defaultBorder,
+        gradientChoice: this.g.settings.defaultGradient,
+        bgimageChoice: this.g.settings.defaultBgimage || '',
+        reactionChoice: this.g.settings.defaultReaction,
+        darkChoice: this.g.settings.defaultDark,
+        cardRoundedChoice: this.g.settings.defaultCardRounded,
+        cardGradientChoice: this.g.settings.defaultCardGradient,
+        cardShadowChoice: this.g.settings.defaultCardShadow,
+        burgerMenuChoice: this.g.settings.defaultBurgerMenuBackground
+      }
+      this.siteCustomisationChanged(defaults)
     }
   },
 
@@ -694,7 +749,7 @@ window.PageAccount = {
     await this.getUserAssets()
     // filter out themes that are not allowed
     this.themeOptions = this.themeOptions.filter(theme =>
-      this.LNBITS_THEME_OPTIONS.includes(theme.name)
+      this.g.settings.themeOptions.includes(theme.name)
     )
   }
 }

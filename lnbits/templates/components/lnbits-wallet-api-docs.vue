@@ -6,6 +6,9 @@
     :content-inset-level="0.5"
   >
     <q-card-section>
+      <q-banner dense rounded class="bg-warning text-black q-mb-md">
+        These keys should be kept safe, sharing them could risk losing funds.
+      </q-banner>
       <q-list>
         <q-item dense class="q-pa-none">
           <q-item-section>
@@ -118,7 +121,7 @@
       </q-list>
     </q-card-section>
     <q-expansion-item
-      v-if="!HIDE_API"
+      v-if="!g.settings.hideApi"
       group="api"
       dense
       expand-separator
@@ -152,7 +155,7 @@
     </q-expansion-item>
 
     <q-expansion-item
-      v-if="!HIDE_API"
+      v-if="!g.settings.hideApi"
       group="api"
       dense
       expand-separator
@@ -197,7 +200,7 @@
       </q-card>
     </q-expansion-item>
     <q-expansion-item
-      v-if="!HIDE_API"
+      v-if="!g.settings.hideApi"
       group="api"
       dense
       expand-separator
@@ -244,7 +247,7 @@
     </q-expansion-item>
 
     <q-expansion-item
-      v-if="!HIDE_API"
+      v-if="!g.settings.hideApi"
       group="api"
       dense
       expand-separator
@@ -273,7 +276,7 @@
       </q-card>
     </q-expansion-item>
     <q-expansion-item
-      v-if="!HIDE_API"
+      v-if="!g.settings.hideApi"
       group="api"
       dense
       expand-separator

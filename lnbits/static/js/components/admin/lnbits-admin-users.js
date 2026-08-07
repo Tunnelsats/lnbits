@@ -1,11 +1,12 @@
 window.app.component('lnbits-admin-users', {
   props: ['form-data'],
   template: '#lnbits-admin-users',
-  mixins: [window.windowMixin],
   data() {
     return {
       formAddUser: '',
-      formAddAdmin: ''
+      formAddAdmin: '',
+      formAddActivationCode: '',
+      showReusableActivationCode: false
     }
   },
   methods: {
@@ -32,6 +33,24 @@ window.app.component('lnbits-admin-users', {
     removeAdminUser(user) {
       let admin_users = this.formData.lnbits_admin_users
       this.formData.lnbits_admin_users = admin_users.filter(u => u !== user)
+    },
+    addOneTimeActivationCode() {
+      const code = this.formAddActivationCode
+      const activationCodes =
+        this.formData.lnbits_register_one_time_activation_codes
+      if (code?.length && !activationCodes.includes(code)) {
+        this.formData.lnbits_register_one_time_activation_codes = [
+          ...activationCodes,
+          code
+        ]
+        this.formAddActivationCode = ''
+      }
+    },
+    removeOneTimeActivationCode(code) {
+      const codes = this.formData.lnbits_register_one_time_activation_codes
+      this.formData.lnbits_register_one_time_activation_codes = codes.filter(
+        u => u !== code
+      )
     }
   }
 })

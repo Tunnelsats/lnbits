@@ -1,6 +1,5 @@
 window.PageHome = {
   template: '#page-home',
-  mixins: [window.windowMixin],
   data() {
     return {
       lnurl: '',
@@ -12,6 +11,7 @@ window.PageHome = {
       email: '',
       password: '',
       passwordRepeat: '',
+      invitationCode: '',
       walletName: '',
       signup: false
     }
@@ -20,40 +20,15 @@ window.PageHome = {
     showClaimLnurl() {
       return (
         this.lnurl !== '' &&
-        this.allowRegister &&
-        'user-id-only' in this.LNBITS_AUTH_METHODS
+        this.g.settings.allowRegister &&
+        this.g.settings.authMethods.includes('user-id-only')
       )
     },
     formatDescription() {
-      return LNbits.utils.convertMarkdown(this.SITE_DESCRIPTION)
+      return LNbits.utils.convertMarkdown(this.g.settings.siteDescription)
     },
     isAccessTokenExpired() {
       return this.$q.cookies.get('is_access_token_expired')
-    },
-    allowRegister() {
-      return this.LNBITS_NEW_ACCOUNTS_ALLOWED
-    },
-    // TODO: this makes no sense
-    hasCustomImage() {
-      return this.LNBITS_CUSTOM_IMAGE
-    },
-    showHomepageElements() {
-      return this.LNBITS_SHOW_HOME_PAGE_ELEMENTS === true
-    },
-    siteTitle() {
-      return this.SITE_TITLE || ''
-    },
-    siteTagline() {
-      return this.SITE_TAGLINE || ''
-    },
-    adsEnabled() {
-      return this.AD_SPACE_ENABLED && this.AD_SPACE && this.AD_SPACE.length > 0
-    },
-    adsTitle() {
-      return this.AD_SPACE_TITLE || ''
-    },
-    ads() {
-      return this.AD_SPACE.map(ad => ad.split(';'))
     }
   },
   methods: {
@@ -66,6 +41,7 @@ window.PageHome = {
       this.username = null
       this.password = null
       this.passwordRepeat = null
+      this.invitationCode = null
 
       this.authAction = 'register'
       this.authMethod = authMethod
@@ -77,7 +53,8 @@ window.PageHome = {
           this.username,
           this.email,
           this.password,
-          this.passwordRepeat
+          this.passwordRepeat,
+          this.invitationCode
         )
         this.refreshAuthUser()
       } catch (e) {

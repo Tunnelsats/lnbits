@@ -1,11 +1,10 @@
 <template id="lnbits-admin-security">
   <q-card-section class="q-pa-none">
-    <h6 class="q-my-none">
+    <h6 class="q-my-none q-mb-sm">
       <span v-text="$t('server_management')"></span>
     </h6>
     <div class="row">
       <div class="col-12 col-md-6">
-        <p><span v-text="$t('base_url')"></span></p>
         <q-input
           filled
           v-model.number="formData.lnbits_baseurl"
@@ -17,7 +16,7 @@
     <h6 class="q-my-none q-mb-sm">
       <span v-text="$t('authentication')"></span>
     </h6>
-    <div class="row q-col-gutter-sm">
+    <div class="row q-col-gutter-sm q-mb-md">
       <div class="col-12 col-md-6">
         <q-input
           filled
@@ -193,6 +192,57 @@
       </div>
     </div>
   </q-card-section>
+  <q-card-section
+    v-if="formData.auth_allowed_methods?.includes('oidc-auth')"
+    class="q-pl-xl"
+  >
+    <strong class="q-my-none q-mb-sm">OIDC Auth</strong>
+
+    <div class="row q-col-gutter-sm q-col-gutter-y-md">
+      <div class="col-12 col-md-4">
+        <q-input
+          filled
+          v-model="formData.oidc_discovery_url"
+          :label="$t('auth_oidc_label')"
+        >
+        </q-input>
+      </div>
+      <div class="col-12 col-md-4">
+        <q-input
+          filled
+          v-model="formData.oidc_client_id"
+          :label="$t('auth_oidc_ci_label')"
+          :hint="$t('auth_oidc_ci_hint')"
+        >
+        </q-input>
+      </div>
+      <div class="col-12 col-md-4">
+        <q-input
+          filled
+          v-model="formData.oidc_client_secret"
+          type="password"
+          :label="$t('auth_oidc_cs_label')"
+        >
+        </q-input>
+      </div>
+      <div class="col-12 col-md-4">
+        <q-input
+          filled
+          v-model="formData.oidc_client_custom_org"
+          :label="$t('auth_oidc_custom_org_label')"
+        >
+        </q-input>
+      </div>
+      <div class="col-12 col-md-8">
+        <q-input
+          filled
+          v-model="formData.oidc_client_custom_icon"
+          :label="$t('auth_oidc_custom_icon_label')"
+        >
+        </q-input>
+      </div>
+    </div>
+  </q-card-section>
   <q-separator></q-separator>
   <q-card-section class="q-pa-none">
     <br />
@@ -305,12 +355,19 @@
                 type="number"
                 v-model.number="formData.lnbits_rate_limit_no"
                 :label="$t('number_of_requests')"
+                :hint="$t('number_of_requests_hint')"
               ></q-input>
             </div>
             <div class="col-12 col-md-6">
               <q-select
                 filled
-                :options="[$t('second'), $t('minute'), $t('hour')]"
+                :options="[
+                  {label: $t('second'), value: 'second'},
+                  {label: $t('minute'), value: 'minute'},
+                  {label: $t('hour'), value: 'hour'}
+                ]"
+                emit-value
+                map-options
                 v-model="formData.lnbits_rate_limit_unit"
                 :label="$t('time_unit')"
               ></q-select>

@@ -6,23 +6,17 @@ from typing import Literal
 
 from fastapi import Query
 from lnurl import LnurlWithdrawResponse
+from loguru import logger
 from pydantic import BaseModel, Field, validator
 
 from lnbits.db import FilterModel
-from lnbits.fiat import get_fiat_provider
 from lnbits.fiat.base import (
-    FiatPaymentFailedStatus,
-    FiatPaymentPendingStatus,
     FiatPaymentStatus,
-    FiatPaymentSuccessStatus,
 )
+from lnbits.helpers import is_valid_external_id
 from lnbits.utils.exchange_rates import allowed_currencies
-from lnbits.wallets import get_funding_source
 from lnbits.wallets.base import (
-    PaymentFailedStatus,
-    PaymentPendingStatus,
     PaymentStatus,
-    PaymentSuccessStatus,
 )
 
 
@@ -41,6 +35,11 @@ class PaymentExtra(BaseModel):
     lnurl_response: str | None = None
 
 
+class UpdatePaymentExtra(BaseModel):
+    payment_hash: str
+    extra: dict = Field(default_factory=dict)
+
+
 class PayInvoice(BaseModel):
     payment_request: str
     description: str | None = None
@@ -55,11 +54,17 @@ class CreatePayment(BaseModel):
     amount_msat: int
     memo: str
     extra: dict | None = {}
+    extension: str | None = None
     preimage: str | None = None
     expiry: datetime | None = None
     webhook: str | None = None
     fee: int = 0
     labels: list[str] | None = None
+    external_id: str | None = None
+
+    @validator("external_id")
+    def validate_external_id(cls, external_id):
+        return _validate_external_id(external_id)
 
 
 class Payment(BaseModel):
@@ -84,6 +89,11 @@ class Payment(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     labels: list[str] = []
     extra: dict = {}
+    external_id: str | None = None
+
+    @validator("external_id")
+    def validate_external_id(cls, external_id):
+        return _validate_external_id(external_id)
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -130,59 +140,19 @@ class Payment(BaseModel):
             "fiat_"
         )
 
-    async def check_status(
-        self, skip_internal_payment_notifications: bool | None = False
-    ) -> PaymentStatus:
-        if self.is_internal:
-            if self.success:
-                return PaymentSuccessStatus()
-            if self.failed:
-                return PaymentFailedStatus()
-            if self.is_in and self.fiat_provider:
-                fiat_status = await self.check_fiat_status(
-                    skip_internal_payment_notifications
-                )
-                return PaymentStatus(paid=fiat_status.paid)
-            return PaymentPendingStatus()
-        funding_source = get_funding_source()
-        if self.is_out:
-            status = await funding_source.get_payment_status(self.checking_id)
-        else:
-            status = await funding_source.get_invoice_status(self.checking_id)
-        return status
+    # DEPRECATED: in v1.5.0, use service check_payment_status instead
+    async def check_status(self) -> PaymentStatus:
+        logger.warning("payment.check_status() is deprecated.")
+        from lnbits.core.services.payments import check_payment_status
 
-    async def check_fiat_status(
-        self, skip_internal_payment_notifications: bool | None = False
-    ) -> FiatPaymentStatus:
-        if not self.is_internal:
-            return FiatPaymentPendingStatus()
-        if self.success:
-            return FiatPaymentSuccessStatus()
-        if self.failed:
-            return FiatPaymentFailedStatus()
+        return await check_payment_status(self)
 
-        if not self.fiat_provider:
-            return FiatPaymentPendingStatus()
+    # DEPRECATED: in v1.5.0, use service check_payment_status instead
+    async def check_fiat_status(self) -> FiatPaymentStatus:
+        logger.warning("payment.check_fiat_status() is deprecated.")
+        from lnbits.core.services.fiat_providers import check_fiat_status
 
-        checking_id = self.extra.get("fiat_checking_id")
-        if not checking_id:
-            return FiatPaymentPendingStatus()
-
-        fiat_provider = await get_fiat_provider(self.fiat_provider)
-        if not fiat_provider:
-            return FiatPaymentPendingStatus()
-        fiat_status = await fiat_provider.get_invoice_status(checking_id)
-
-        if skip_internal_payment_notifications:
-            return fiat_status
-
-        if fiat_status.success:
-            # notify receivers asynchronously
-            from lnbits.tasks import internal_invoice_queue
-
-            await internal_invoice_queue.put(self.checking_id)
-
-        return fiat_status
+        return await check_fiat_status(self)
 
 
 class PaymentFilters(FilterModel):
@@ -194,6 +164,7 @@ class PaymentFilters(FilterModel):
         "status",
         "time",
         "labels",
+        "external_id",
     ]
 
     __sort_fields__ = [
@@ -204,11 +175,13 @@ class PaymentFilters(FilterModel):
         "memo",
         "time",
         "tag",
+        "external_id",
     ]
 
     status: str | None
     tag: str | None
     checking_id: str | None
+    external_id: str | None
     amount: int
     fee: int
     memo: str | None
@@ -287,11 +260,13 @@ class CreateInvoice(BaseModel):
     )
     expiry: int | None = None
     extra: dict | None = None
+    extension: str | None = None
     webhook: str | None = None
     bolt11: str | None = None
     lnurl_withdraw: LnurlWithdrawResponse | None = None
     fiat_provider: str | None = None
     labels: list[str] = []
+    external_id: str | None = Query(default=None, max_length=256)
 
     @validator("payment_hash")
     def check_hex(cls, v):
@@ -305,6 +280,10 @@ class CreateInvoice(BaseModel):
         if v != "sat" and v not in allowed_currencies():
             raise ValueError("The provided unit is not supported")
         return v
+
+    @validator("external_id")
+    def validate_external_id(cls, external_id):
+        return _validate_external_id(external_id)
 
 
 class PaymentsStatusCount(BaseModel):
@@ -344,3 +323,12 @@ class CancelInvoice(BaseModel):
 
 class UpdatePaymentLabels(BaseModel):
     labels: list[str] = []
+
+
+def _validate_external_id(external_id: str | None) -> str | None:
+    if external_id and not is_valid_external_id(external_id):
+        raise ValueError(
+            "Invalid external id. Max length is 256 characters. "
+            "Space and newlines are not allowed."
+        )
+    return external_id

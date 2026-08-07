@@ -14,7 +14,6 @@ nav_order: 1
 ![phase: stable](https://img.shields.io/badge/phase-stable-2EA043)
 ![PRs: welcome](https://img.shields.io/badge/PRs-Welcome-yellow)
 [<img src="https://img.shields.io/badge/community_chat-Telegram-24A1DE">](https://t.me/lnbits)
-[<img src="https://img.shields.io/badge/supported_by-%3E__OpenSats-f97316">](https://opensats.org)
 
 # Backend Wallet Comparison Table
 
@@ -50,6 +49,7 @@ Below is a side-by-side comparison of Lightning funding sources you can use with
 | **Blink**                      | Custodial                | ✅                  | Low                            | ❌                        | Low               | Provider-managed         | Easy              | Low                    | Transaction fees apply                       | Medium          | Third-party service; focuses on mobile integrations.                                       |
 | **ZBD**                        | Custodial                | ✅                  | Low                            | ❌                        | Low               | Provider-managed         | Easy              | Low                    | Transaction fees apply                       | Medium          | Gaming-focused payment platform.                                                           |
 | **Spark (CLN)**                | Self-custodial           | ❌                  | Higher                         | ✅                        | High              | Manual                   | Moderate          | High                   | Infrastructure cost and channel opening fees | High            | Web interface for CLN; requires Spark server setup.                                        |
+| **Spark (L2)**                 | Self-custodial           | ❌                  | Medium                         | ❌                        | High              | Automatic                | Easy              | Low                    | Minimal fees                                 | Medium          | Runs via Spark sidecar; seed-based self-custody.                                           |
 | **Cliche Wallet**              | Self-custodial           | ❌                  | Medium                         | ❌                        | Medium            | Manual                   | Moderate          | Moderate               | Minimal fees                                 | Medium          | Lightweight wallet; suitable for embedded systems.                                         |
 | **Strike**                     | Custodial                | ✅                  | Low                            | ❌                        | Low               | Provider-managed         | Easy              | Low                    | Transaction fees apply                       | Medium          | Third-party service; suitable for quick setups.                                            |
 | **LNPay**                      | Custodial                | ✅                  | Low                            | ❌                        | Low               | Provider-managed         | Easy              | Low                    | Transaction fees apply                       | Medium          | Third-party service; suitable for quick setups.                                            |
@@ -57,7 +57,9 @@ Below is a side-by-side comparison of Lightning funding sources you can use with
 | **LN.tips**                    | Custodial/Self-Custodial | Depends on provider | Medium                         | ❌                        | Low               | Provider-managed         | Moderate          | Low                    | Transaction fees may apply                   | Medium          | Simple hosted service; use LN.tips API as your backend.                                    |
 | **Fake Wallet**                | Testing (simulated)      | ❌                  | Low                            | ❌                        | N/A               | N/A                      | Easy              | Low                    | None (test only)                             | N/A             | For testing only; mints accounting units in LNbits (no real sats, unit name configurable). |
 
----
+## Spark (L2)
+
+Spark L2 uses a local Node.js sidecar to expose an HTTP API that LNbits can use as a funding source. It is self-custodial and secured by a standard mnemonic seed. Sidecar repo `https://github.com/lnbits/spark_sidecar`.
 
 ### Notes for readers
 

@@ -41,6 +41,14 @@ class UsersSettings(LNbitsSettings):
     lnbits_admin_users: list[str] = Field(default=[])
     lnbits_allowed_users: list[str] = Field(default=[])
     lnbits_allow_new_accounts: bool = Field(default=True)
+    lnbits_require_user_activation: bool = Field(default=False)
+
+    lnbits_user_activation_by_email: bool = Field(default=False)
+    lnbits_user_activation_by_payment: bool = Field(default=False)
+    lnbits_user_activation_by_invitation_code: bool = Field(default=False)
+
+    lnbits_register_reusable_activation_code: str = Field(default="")
+    lnbits_register_one_time_activation_codes: list[str] = Field(default=[])
 
     @property
     def new_accounts_allowed(self) -> bool:
@@ -52,6 +60,13 @@ class ExtensionsSettings(LNbitsSettings):
     lnbits_user_default_extensions: list[str] = Field(default=[])
     lnbits_extensions_deactivate_all: bool = Field(default=False)
     lnbits_extensions_builder_activate_non_admins: bool = Field(default=False)
+    lnbits_extensions_reviews_url: str = Field(
+        default="https://demo.lnbits.com/paidreviews/api/v1/AdFzLjzuKFLsdk4Bcnff6r",
+        description="""
+            URL for the paid reviews.
+            Regular users can view this URL (not secret).
+            """,
+    )
     lnbits_extensions_manifests: list[str] = Field(
         default=[
             "https://raw.githubusercontent.com/lnbits/lnbits-extensions/main/extensions.json"
@@ -245,6 +260,11 @@ class ThemesSettings(LNbitsSettings):
     )
     lnbits_show_home_page_elements: bool = Field(default=True)
     lnbits_default_wallet_name: str = Field(default="LNbits wallet")
+
+    lnbits_wallet_featured_button_label: str | None = Field(default=None)
+    lnbits_wallet_featured_button_url: str | None = Field(default=None)
+    lnbits_wallet_featured_button_icon: str | None = Field(default=None)
+
     lnbits_custom_badge: str | None = Field(default=None)
     lnbits_custom_badge_color: str = Field(default="warning")
     lnbits_theme_options: list[str] = Field(
@@ -264,7 +284,7 @@ class ThemesSettings(LNbitsSettings):
     lnbits_custom_image: str | None = Field(default="/static/images/logos/lnbits.svg")
     lnbits_ad_space_title: str = Field(default="Supported by")
     lnbits_ad_space: str = Field(
-        default="https://shop.lnbits.com/;/static/images/bitcoin-shop-banner.png;/static/images/bitcoin-shop-banner.png,https://affil.trezor.io/aff_c?offer_id=169&aff_id=33845;/static/images/bitcoin-hardware-wallet.png;/static/images/bitcoin-hardware-wallet.png,https://firefish.io/?ref=lnbits;/static/images/firefish.png;/static/images/firefish.png,https://opensats.org/;/static/images/open-sats.png;/static/images/open-sats.png"
+        default="https://shop.lnbits.com/;/static/images/bitcoin-shop-banner.png;/static/images/bitcoin-shop-banner.png,https://affil.trezor.io/aff_c?offer_id=169&aff_id=33845;/static/images/bitcoin-hardware-wallet.png;/static/images/bitcoin-hardware-wallet.png,https://firefish.io/?ref=lnbits;/static/images/firefish.png;/static/images/firefish.png"
     )  # sneaky sneaky
     lnbits_ad_space_enabled: bool = Field(default=False)
     lnbits_allowed_currencies: list[str] = Field(default=[])
@@ -272,10 +292,15 @@ class ThemesSettings(LNbitsSettings):
     lnbits_qr_logo: str = Field(default="/static/images/favicon_qr_logo.png")
     lnbits_apple_touch_icon: str | None = Field(default=None)
     lnbits_default_reaction: str = Field(default="confettiBothSides")
-    lnbits_default_theme: str = Field(default="salvador")
+    lnbits_default_theme: str = Field(default="bitcoin")
     lnbits_default_border: str = Field(default="hard-border")
     lnbits_default_gradient: bool = Field(default=True)
     lnbits_default_bgimage: str | None = Field(default=None)
+    lnbits_default_dark: bool = Field(default=True)
+    lnbits_default_card_rounded: bool = Field(default=True)
+    lnbits_default_card_gradient: bool = Field(default=True)
+    lnbits_default_card_shadow: bool = Field(default=False)
+    lnbits_default_burger_menu_background: bool = Field(default=True)
 
 
 class OpsSettings(LNbitsSettings):
@@ -334,9 +359,11 @@ class FeeSettings(LNbitsSettings):
 
 
 class ExchangeProvidersSettings(LNbitsSettings):
-    lnbits_exchange_rate_cache_seconds: int = Field(default=30, ge=0)
+    lnbits_exchange_rate_cache_seconds: int = Field(default=60, ge=0)
     lnbits_exchange_history_size: int = Field(default=60, ge=0)
     lnbits_exchange_history_refresh_interval_seconds: int = Field(default=300, ge=0)
+    lnbits_price_aggregator_enabled: bool = Field(default=True)
+    lnbits_price_aggregator_url: str = Field(default="https://price.lnbits.com")
 
     lnbits_exchange_rate_providers: list[ExchangeRateProvider] = Field(
         default=[
@@ -419,6 +446,7 @@ class SecuritySettings(LNbitsSettings):
 
     lnbits_max_outgoing_payment_amount_sats: int = Field(default=10_000_000, ge=0)
     lnbits_max_incoming_payment_amount_sats: int = Field(default=10_000_000, ge=0)
+    first_install_token_confirmed: str | None = Field(default=None)
 
     def is_wallet_max_balance_exceeded(self, amount):
         return (
@@ -559,6 +587,9 @@ class ZBDFundingSource(LNbitsSettings):
 class PhoenixdFundingSource(LNbitsSettings):
     phoenixd_api_endpoint: str | None = Field(default="http://localhost:9740/")
     phoenixd_api_password: str | None = Field(default=None)
+    phoenixd_data_dir: str | None = Field(default=None)
+    phoenixd_mnemonic: str | None = Field(default=None)
+    phoenixd_mnemonic_backup_confirmed: bool = Field(default=False)
 
 
 class AlbyFundingSource(LNbitsSettings):
@@ -576,6 +607,17 @@ class OpenNodeFundingSource(LNbitsSettings):
 class SparkFundingSource(LNbitsSettings):
     spark_url: str | None = Field(default=None)
     spark_token: str | None = Field(default=None)
+
+
+class SparkL2FundingSource(LNbitsSettings):
+    spark_l2_network: str = Field(default="MAINNET")
+    spark_l2_external_endpoint: str | None = Field(default="http://localhost:8765")
+    spark_l2_external_api_key: str | None = Field(default=None)
+    spark_l2_mnemonic: str | None = Field(default=None)
+    spark_l2_mnemonic_backup_confirmed: bool = Field(default=False)
+    spark_l2_pay_wait_ms: int = Field(default=4000, ge=0)
+    spark_l2_pay_poll_ms: int = Field(default=500, ge=0)
+    spark_l2_stream_keepalive_ms: int = Field(default=15000, ge=0)
 
 
 class LnTipsFundingSource(LNbitsSettings):
@@ -610,6 +652,7 @@ class BoltzFundingSource(LNbitsSettings):
     boltz_client_password: str = Field(default="")
     boltz_client_cert: str | None = Field(default=None)
     boltz_mnemonic: str | None = Field(default=None)
+    boltz_mnemonic_backup_confirmed: bool = Field(default=False)
 
 
 class StrikeFundingSource(LNbitsSettings):
@@ -661,6 +704,35 @@ class PayPalFiatProvider(LNbitsSettings):
     paypal_limits: FiatProviderLimits = Field(default_factory=FiatProviderLimits)
 
 
+class SquareFiatProvider(LNbitsSettings):
+    square_enabled: bool = Field(default=False)
+    square_api_endpoint: str = Field(default="https://connect.squareup.com")
+    square_access_token: str | None = Field(default=None)
+    square_location_id: str | None = Field(default=None)
+    square_api_version: str = Field(default="2026-01-22")
+    square_payment_success_url: str = Field(default="https://lnbits.com")
+    square_payment_webhook_url: str = Field(
+        default="https://your-lnbits-domain-here.com/api/v1/callback/square"
+    )
+    square_webhook_signature_key: str | None = Field(default=None)
+
+    square_limits: FiatProviderLimits = Field(default_factory=FiatProviderLimits)
+
+
+class RevolutFiatProvider(LNbitsSettings):
+    revolut_enabled: bool = Field(default=False)
+    revolut_api_endpoint: str = Field(default="https://merchant.revolut.com")
+    revolut_api_secret_key: str | None = Field(default=None)
+    revolut_api_version: str = Field(default="2026-04-20")
+    revolut_payment_success_url: str = Field(default="https://lnbits.com")
+    revolut_payment_webhook_url: str = Field(
+        default="https://your-lnbits-domain-here.com/api/v1/callback/revolut"
+    )
+    revolut_webhook_signing_secret: str | None = Field(default=None)
+
+    revolut_limits: FiatProviderLimits = Field(default_factory=FiatProviderLimits)
+
+
 class LightningSettings(LNbitsSettings):
     lightning_invoice_expiry: int = Field(default=3600, gt=0)
 
@@ -683,6 +755,7 @@ class FundingSourcesSettings(
     PhoenixdFundingSource,
     OpenNodeFundingSource,
     SparkFundingSource,
+    SparkL2FundingSource,
     LnTipsFundingSource,
     NWCFundingSource,
     BreezSdkFundingSource,
@@ -693,10 +766,16 @@ class FundingSourcesSettings(
     # How long to wait for the payment to be confirmed before returning a pending status
     # It will not fail the payment, it will make it return pending after the timeout
     lnbits_funding_source_pay_invoice_wait_seconds: int = Field(default=5, ge=0)
+    lnbits_funding_source_pending_interval_seconds: int = Field(default=1800, ge=0)
     funding_source_max_retries: int = Field(default=4, ge=0)
 
 
-class FiatProvidersSettings(StripeFiatProvider, PayPalFiatProvider):
+class FiatProvidersSettings(
+    StripeFiatProvider,
+    PayPalFiatProvider,
+    SquareFiatProvider,
+    RevolutFiatProvider,
+):
     def is_fiat_provider_enabled(self, provider: str | None) -> bool:
         """
         Checks if a specific fiat provider is enabled.
@@ -707,6 +786,10 @@ class FiatProvidersSettings(StripeFiatProvider, PayPalFiatProvider):
             return self.stripe_enabled
         if provider == "paypal":
             return self.paypal_enabled
+        if provider == "square":
+            return self.square_enabled
+        if provider == "revolut":
+            return self.revolut_enabled
         return False
 
     def get_fiat_providers_for_user(self, user_id: str) -> list[str]:
@@ -725,6 +808,18 @@ class FiatProvidersSettings(StripeFiatProvider, PayPalFiatProvider):
             or user_id in self.paypal_limits.allowed_users
         ):
             allowed_providers.append("paypal")
+
+        if self.square_enabled and (
+            not self.square_limits.allowed_users
+            or user_id in self.square_limits.allowed_users
+        ):
+            allowed_providers.append("square")
+
+        if self.revolut_enabled and (
+            not self.revolut_limits.allowed_users
+            or user_id in self.revolut_limits.allowed_users
+        ):
+            allowed_providers.append("revolut")
 
         return allowed_providers
 
@@ -757,6 +852,7 @@ class AuthMethods(Enum):
     google_auth = "google-auth"
     github_auth = "github-auth"
     keycloak_auth = "keycloak-auth"
+    oidc_auth = "oidc-auth"
 
     @classmethod
     def all(cls):
@@ -767,6 +863,7 @@ class AuthMethods(Enum):
             AuthMethods.google_auth.value,
             AuthMethods.github_auth.value,
             AuthMethods.keycloak_auth.value,
+            AuthMethods.oidc_auth.value,
         ]
 
 
@@ -810,6 +907,14 @@ class KeycloakAuthSettings(LNbitsSettings):
     keycloak_client_secret: str = Field(default="")
     keycloak_client_custom_org: str | None = Field(default=None)
     keycloak_client_custom_icon: str | None = Field(default=None)
+
+
+class OidcAuthSettings(LNbitsSettings):
+    oidc_discovery_url: str = Field(default="")
+    oidc_client_id: str = Field(default="")
+    oidc_client_secret: str = Field(default="")
+    oidc_client_custom_org: str | None = Field(default=None)
+    oidc_client_custom_icon: str | None = Field(default=None)
 
 
 class AuditSettings(LNbitsSettings):
@@ -919,6 +1024,7 @@ class EditableSettings(
     GoogleAuthSettings,
     GitHubAuthSettings,
     KeycloakAuthSettings,
+    OidcAuthSettings,
 ):
     @validator(
         "lnbits_admin_users",
@@ -946,7 +1052,7 @@ class EditableSettings(
 
 
 class UpdateSettings(EditableSettings):
-    class Config:
+    class Config(EditableSettings.Config):
         extra = Extra.forbid
 
 
@@ -954,6 +1060,9 @@ class EnvSettings(LNbitsSettings):
     debug: bool = Field(default=False)
     debug_database: bool = Field(default=False)
     bundle_assets: bool = Field(default=True)
+    profiler: bool = Field(default=False)
+    # When enabled, auth cookies require HTTPS and SSO will reject insecure HTTP.
+    auth_https_only: bool = Field(default=True)
     host: str = Field(default="127.0.0.1")
     port: int = Field(default=5000, gt=0)
     forwarded_allow_ips: str = Field(default="*")
@@ -967,13 +1076,23 @@ class EnvSettings(LNbitsSettings):
     enable_log_to_file: bool = Field(default=True)
     log_rotation: str = Field(default="100 MB")
     log_retention: str = Field(default="3 months")
+    first_install_token: str | None = Field(default=None)
 
     cleanup_wallets_days: int = Field(default=90, ge=0)
     funding_source_max_retries: int = Field(default=4, ge=0)
+    lnbits_max_users: int = Field(default=0, ge=0)
+    lnbits_max_extensions: int = Field(default=0, ge=0)
 
     @property
     def has_default_extension_path(self) -> bool:
         return self.lnbits_extensions_path == "lnbits"
+
+    def has_first_install_token_changed(self) -> bool:
+        if not self.first_install_token:
+            return False
+        if not settings.first_install_token_confirmed:
+            return False
+        return self.first_install_token != settings.first_install_token_confirmed
 
     def check_auth_secret_key(self):
         if self.auth_secret_key:
@@ -1010,6 +1129,7 @@ class SuperUserSettings(LNbitsSettings):
             "FakeWallet",
             "LNPayWallet",
             "LNbitsWallet",
+            "SparkL2Wallet",
             "LnTipsWallet",
             "LndRestWallet",
             "LndWallet",
@@ -1083,11 +1203,11 @@ class ReadOnlySettings(
 
 
 class Settings(EditableSettings, ReadOnlySettings, TransientSettings, BaseSettings):
-    class Config:
+    class Config(EditableSettings.Config, BaseSettings.Config):  # type: ignore[misc]
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
-        json_loads = list_parse_fallback
+        json_loads = list_parse_fallback  # type: ignore[assignment]
 
     def is_user_allowed(self, user_id: str) -> bool:
         return (
@@ -1113,6 +1233,139 @@ class Settings(EditableSettings, ReadOnlySettings, TransientSettings, BaseSettin
         return (
             ext_id not in self.lnbits_installed_extensions_ids
             and ext_id in self.lnbits_all_extensions_ids
+        )
+
+    def to_public(self) -> PublicSettings:
+        return PublicSettings.from_settings(self)
+
+
+class PublicSettings(BaseModel):
+    """
+    PublicSettings is used for templating and public information.
+    WARNING: do not expose private information, PublicSettings is exposed publicly.
+    """
+
+    allow_register: bool = Field(alias="allowRegister")
+    qr_logo: str = Field(alias="qrLogo")
+    site_title: str = Field(alias="siteTitle")
+    site_tagline: str = Field(alias="siteTagline")
+    site_description: str | None = Field(alias="siteDescription")
+    auth_methods: list[str] = Field(alias="authMethods")
+    keycloak_org: str | None = Field(alias="keycloakOrg")
+    keycloak_icon: str | None = Field(alias="keycloakIcon")
+    oidc_org: str | None = Field(alias="oidcOrg")
+    oidc_icon: str | None = Field(alias="oidcIcon")
+    has_holdinvoice: bool = Field(alias="hasHoldinvoice")
+    has_nodemanager: bool = Field(alias="hasNodemanager")
+    show_nodemanager: bool = Field(alias="showNodemanager")
+    custom_logo: str | None = Field(alias="customLogo")
+    show_voidwallet: bool = Field(alias="showVoidwallet")
+    version: str = Field(alias="version")
+    show_home_page_elements: bool = Field(alias="showHomePageElements")
+    hide_api: bool = Field(alias="hideApi")
+    cache_key: str = Field(alias="cacheKey")
+    webpush_pubkey: str | None = Field(alias="webpushPubkey")
+    show_extensions: bool = Field(alias="showExtensions")
+    show_audit: bool = Field(alias="showAudit")
+    show_admin: bool = Field(alias="showAdmin")
+    ad_space: list[list[str]] = Field(alias="adSpace")
+    ad_space_title: str = Field(alias="adSpaceTitle")
+    show_ad_space: bool = Field(alias="showAdSpace")
+    custom_image: str | None = Field(alias="customImage")
+    custom_badge: str | None = Field(alias="customBadge")
+    custom_badge_color: str | None = Field(alias="customBadgeColor")
+    service_fee: float = Field(alias="serviceFee")
+    service_fee_max: int = Field(alias="serviceFeeMax")
+    service_fee_wallet: str | None = Field(alias="serviceFeeWallet")
+    theme_options: list[str] = Field(alias="themeOptions")
+    default_reaction: str = Field(alias="defaultReaction")
+    default_theme: str = Field(alias="defaultTheme")
+    default_border: str = Field(alias="defaultBorder")
+    default_bgimage: str | None = Field(alias="defaultBgimage")
+    default_gradient: bool = Field(alias="defaultGradient")
+    default_dark: bool = Field(alias="defaultDark")
+    default_card_rounded: bool = Field(alias="defaultCardRounded")
+    default_card_gradient: bool = Field(alias="defaultCardGradient")
+    default_card_shadow: bool = Field(alias="defaultCardShadow")
+    default_burger_menu_background: bool = Field(alias="defaultBurgerMenuBackground")
+    denomination: str | None = Field()
+    extensions: list[str] = Field()
+    allowed_currencies: list[str] = Field(alias="allowedCurrencies")
+    extensions_reviews_url: str = Field(alias="extensionsReviewsUrl")
+    ext_builder: bool = Field(alias="extBuilder")
+    nostr_configured: bool = Field(alias="nostrConfigured")
+    telegram_configured: bool = Field(alias="telegramConfigured")
+    wallet_featured_button_label: str | None = Field(alias="walletFeaturedButtonLabel")
+    wallet_featured_button_url: str | None = Field(alias="walletFeaturedButtonUrl")
+    wallet_featured_button_icon: str | None = Field(alias="walletFeaturedButtonIcon")
+    lnbits_user_activation_by_email: bool = Field(alias="userActivationByEmail")
+    lnbits_user_activation_by_payment: bool = Field(alias="userActivationByPayment")
+    lnbits_user_activation_by_invitation_code: bool = Field(
+        alias="userActivationByInvitationCode"
+    )
+    has_first_install_token: bool = Field(alias="hasFirstInstallToken")
+
+    @classmethod
+    def from_settings(cls, settings: Settings):
+        ads = [x.split(";") for x in settings.lnbits_ad_space.split(",")]
+        return cls(
+            adSpace=ads,
+            adSpaceTitle=settings.lnbits_ad_space_title,
+            showAdSpace=settings.lnbits_ad_space_enabled and len(ads) > 0,
+            allowRegister=settings.new_accounts_allowed,
+            qrLogo=settings.lnbits_qr_logo,
+            siteDescription=settings.lnbits_site_description,
+            siteTitle=settings.lnbits_site_title,
+            siteTagline=settings.lnbits_site_tagline,
+            authMethods=settings.auth_allowed_methods,
+            keycloakOrg=settings.keycloak_client_custom_org,
+            keycloakIcon=settings.keycloak_client_custom_icon,
+            oidcOrg=settings.oidc_client_custom_org,
+            oidcIcon=settings.oidc_client_custom_icon,
+            hasHoldinvoice=settings.has_holdinvoice,
+            hasNodemanager=settings.has_nodemanager,
+            showNodemanager=settings.lnbits_node_ui and settings.has_nodemanager,
+            customLogo=settings.lnbits_custom_logo,
+            showVoidwallet=settings.lnbits_backend_wallet_class == "VoidWallet",
+            version=settings.version,
+            showHomePageElements=settings.lnbits_show_home_page_elements,
+            hideApi=settings.lnbits_hide_api,
+            cacheKey=str(settings.server_startup_time),
+            webpushPubkey=settings.lnbits_webpush_pubkey,
+            showExtensions=not settings.lnbits_extensions_deactivate_all,
+            showAudit=settings.lnbits_audit_enabled,
+            showAdmin=settings.lnbits_admin_ui,
+            customImage=settings.lnbits_custom_image,
+            customBadge=settings.lnbits_custom_badge,
+            customBadgeColor=settings.lnbits_custom_badge_color,
+            serviceFee=settings.lnbits_service_fee,
+            serviceFeeMax=settings.lnbits_service_fee_max,
+            serviceFeeWallet=settings.lnbits_service_fee_wallet,
+            themeOptions=settings.lnbits_theme_options,
+            defaultReaction=settings.lnbits_default_reaction,
+            defaultTheme=settings.lnbits_default_theme,
+            defaultBorder=settings.lnbits_default_border,
+            defaultGradient=settings.lnbits_default_gradient,
+            defaultBgimage=settings.lnbits_default_bgimage,
+            defaultDark=settings.lnbits_default_dark,
+            defaultCardRounded=settings.lnbits_default_card_rounded,
+            defaultCardGradient=settings.lnbits_default_card_gradient,
+            defaultCardShadow=settings.lnbits_default_card_shadow,
+            defaultBurgerMenuBackground=settings.lnbits_default_burger_menu_background,
+            denomination=settings.lnbits_denomination,
+            extensions=list(settings.lnbits_installed_extensions_ids),
+            allowedCurrencies=settings.lnbits_allowed_currencies,
+            extensionsReviewsUrl=settings.lnbits_extensions_reviews_url,
+            extBuilder=settings.lnbits_extensions_builder_activate_non_admins,
+            nostrConfigured=settings.is_nostr_notifications_configured(),
+            telegramConfigured=settings.is_telegram_notifications_configured(),
+            walletFeaturedButtonLabel=settings.lnbits_wallet_featured_button_label,
+            walletFeaturedButtonUrl=settings.lnbits_wallet_featured_button_url,
+            walletFeaturedButtonIcon=settings.lnbits_wallet_featured_button_icon,
+            userActivationByEmail=settings.lnbits_user_activation_by_email,
+            userActivationByPayment=settings.lnbits_user_activation_by_payment,
+            userActivationByInvitationCode=settings.lnbits_user_activation_by_invitation_code,
+            hasFirstInstallToken=settings.first_install_token is not None,
         )
 
 

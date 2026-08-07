@@ -120,7 +120,7 @@
                         class="q-mb-md"
                       ></q-input>
                       <q-input
-                        v-if="g.user.has_password"
+                        v-if="g.user.hasPassword"
                         v-model="credentialsData.oldPassword"
                         type="password"
                         autocomplete="off"
@@ -258,15 +258,22 @@
                         class="q-mb-md"
                       >
                       </q-input>
-                      <div v-if="!g.user.email" class="row"></div>
                       <div v-if="!g.user.email" class="row">
-                        {% if "google-auth" in LNBITS_AUTH_METHODS or
-                        "github-auth" in LNBITS_AUTH_METHODS %}
-                        <div class="col q-pa-sm text-h6">
+                        <div
+                          v-if="
+                            'google-auth' in g.settings.authMethods ||
+                            'github-auth' in g.settings.authMethods ||
+                            'keycloak-auth' in g.settings.authMethods ||
+                            'oidc-auth' in g.settings.authMethods
+                          "
+                          class="col q-pa-sm text-h6"
+                        >
                           <span v-text="$t('verify_email')"></span>:
                         </div>
-                        {%endif%} {% if "google-auth" in LNBITS_AUTH_METHODS %}
-                        <div class="col q-pa-sm">
+                        <div
+                          v-if="'google-auth' in g.settings.authMethods"
+                          class="col q-pa-sm"
+                        >
                           <q-btn
                             :href="`/api/v1/auth/google?user_id=${g.user.id}`"
                             type="a"
@@ -284,8 +291,10 @@
                             <div>Google</div>
                           </q-btn>
                         </div>
-                        {%endif%} {% if "github-auth" in LNBITS_AUTH_METHODS %}
-                        <div class="col q-pa-sm">
+                        <div
+                          v-if="'github-auth' in g.settings.authMethods"
+                          class="col q-pa-sm"
+                        >
                           <q-btn
                             :href="`/api/v1/auth/github?user_id=${g.user.id}`"
                             type="a"
@@ -303,7 +312,58 @@
                             <div>GitHub</div>
                           </q-btn>
                         </div>
-                        {%endif%}
+                        <div
+                          v-if="'keycloak-auth' in g.settings.authMethods"
+                          class="col q-pa-sm"
+                        >
+                          <q-btn
+                            :href="`/api/v1/auth/keycloak?user_id=${g.user.id}`"
+                            type="a"
+                            outline
+                            no-caps
+                            color="grey"
+                            rounded
+                            class="full-width"
+                          >
+                            <q-avatar size="32px" class="q-mr-md">
+                              <q-img
+                                :src="
+                                  g.settings.keycloakIcon
+                                    ? g.settings.keycloakIcon
+                                    : '{{ static_url_for('static', 'images/keycloak-logo.png') }}'
+                                "
+                              ></q-img>
+                            </q-avatar>
+                            <div
+                              v-text="g.settings.keycloakOrg || 'Keycloak'"
+                            ></div>
+                          </q-btn>
+                        </div>
+                        <div
+                          v-if="'oidc-auth' in g.settings.authMethods"
+                          class="col q-pa-sm"
+                        >
+                          <q-btn
+                            :href="`/api/v1/auth/oidc?user_id=${g.user.id}`"
+                            type="a"
+                            outline
+                            no-caps
+                            color="grey"
+                            rounded
+                            class="full-width"
+                          >
+                            <q-avatar size="32px" class="q-mr-md">
+                              <q-img
+                                :src="
+                                  g.settings.oidcIcon
+                                    ? g.settings.oidcIcon
+                                    : '{{ static_url_for('static', 'images/generic-oidc-logo.svg') }}'
+                                "
+                              ></q-img>
+                            </q-avatar>
+                            <div v-text="g.settings.oidcOrg || 'OIDC'"></div>
+                          </q-btn>
+                        </div>
                       </div>
                     </q-card-section>
 
@@ -333,6 +393,16 @@
                         class="q-mb-md"
                       >
                       </q-input>
+
+                      <q-input
+                        v-model="g.user.extra.visible_wallet_count"
+                        :label="$t('visible_wallet_count')"
+                        filled
+                        dense
+                        type="number"
+                        class="q-mb-md"
+                      ></q-input>
+
                       <q-input
                         v-model="g.user.external_id"
                         :label="$t('external_id')"
@@ -380,22 +450,11 @@
                       <span v-text="$t('language')"></span>
                     </div>
                     <div class="col-8">
-                      <lnbits-language-dropdown />
-                    </div>
-                  </div>
-                  <div class="row q-mb-md">
-                    <div class="col-4">
-                      <span v-text="$t('visible_wallet_count')"></span>
-                    </div>
-                    <div class="col-8">
-                      <q-input
-                        v-model="g.user.extra.visible_wallet_count"
-                        :label="$t('visible_wallet_count')"
-                        filled
-                        dense
-                        type="number"
-                        class="q-mb-md"
-                      ></q-input>
+                      <lnbits-language-dropdown
+                        @language-changed="
+                          siteCustomisationChanged({locale: $event})
+                        "
+                      />
                     </div>
                   </div>
 
@@ -407,7 +466,9 @@
                       <q-btn
                         v-for="theme in themeOptions"
                         :key="theme.name"
-                        @click="g.themeChoice = theme.name"
+                        @click="
+                          siteCustomisationChanged({themeChoice: theme.name})
+                        "
                         :color="theme.color"
                         dense
                         flat
@@ -427,11 +488,32 @@
                       <q-input
                         v-model="g.bgimageChoice"
                         :label="$t('background_image')"
+                        @update:model-value="
+                          siteCustomisationChanged({bgimageChoice: $event})
+                        "
                       >
+                        <template v-slot:append>
+                          <q-btn
+                            dense
+                            flat
+                            round
+                            icon="upload"
+                            @click="$refs.backgroundImageInput.click()"
+                          >
+                            <q-tooltip>Upload background image</q-tooltip>
+                          </q-btn>
+                        </template>
                         <q-tooltip
                           ><span v-text="$t('background_image')"></span
                         ></q-tooltip>
                       </q-input>
+                      <input
+                        type="file"
+                        ref="backgroundImageInput"
+                        accept="image/*"
+                        style="display: none"
+                        @change="onBackgroundImageInput"
+                      />
                     </div>
                   </div>
                   <div class="row q-mb-md">
@@ -445,9 +527,99 @@
                         round
                         icon="gradient"
                         v-model="g.gradientChoice"
+                        @update:model-value="
+                          siteCustomisationChanged({gradientChoice: $event})
+                        "
                       >
                         <q-tooltip
                           ><span v-text="$t('toggle_gradient')"></span
+                        ></q-tooltip>
+                      </q-toggle>
+                    </div>
+                  </div>
+                  <div class="row q-mb-md">
+                    <div class="col-4">
+                      <span v-text="$t('rounded_ui')"></span>
+                    </div>
+                    <div class="col-8">
+                      <q-toggle
+                        dense
+                        flat
+                        round
+                        icon="rounded_corner"
+                        v-model="g.cardRoundedChoice"
+                        @update:model-value="
+                          siteCustomisationChanged({cardRoundedChoice: $event})
+                        "
+                      >
+                        <q-tooltip
+                          ><span v-text="$t('toggle_rounded_ui')"></span
+                        ></q-tooltip>
+                      </q-toggle>
+                    </div>
+                  </div>
+                  <div class="row q-mb-md">
+                    <div class="col-4">
+                      <span v-text="$t('card_gradient')"></span>
+                    </div>
+                    <div class="col-8">
+                      <q-toggle
+                        dense
+                        flat
+                        round
+                        icon="gradient"
+                        v-model="g.cardGradientChoice"
+                        @update:model-value="
+                          siteCustomisationChanged({cardGradientChoice: $event})
+                        "
+                      >
+                        <q-tooltip
+                          ><span v-text="$t('toggle_card_gradient')"></span
+                        ></q-tooltip>
+                      </q-toggle>
+                    </div>
+                  </div>
+                  <div class="row q-mb-md">
+                    <div class="col-4">
+                      <span v-text="$t('card_shadow')"></span>
+                    </div>
+                    <div class="col-8">
+                      <q-toggle
+                        dense
+                        flat
+                        round
+                        icon="blur_on"
+                        v-model="g.cardShadowChoice"
+                        @update:model-value="
+                          siteCustomisationChanged({cardShadowChoice: $event})
+                        "
+                      >
+                        <q-tooltip
+                          ><span v-text="$t('toggle_card_shadow')"></span
+                        ></q-tooltip>
+                      </q-toggle>
+                    </div>
+                  </div>
+
+                  <div class="row q-mb-md">
+                    <div class="col-4">
+                      <span v-text="$t('burger_menu_background')"></span>
+                    </div>
+                    <div class="col-8">
+                      <q-toggle
+                        dense
+                        flat
+                        round
+                        icon="menu_open"
+                        v-model="g.burgerMenuChoice"
+                        @update:model-value="
+                          siteCustomisationChanged({burgerMenuChoice: $event})
+                        "
+                      >
+                        <q-tooltip
+                          ><span
+                            v-text="$t('toggle_burger_menu_background')"
+                          ></span
                         ></q-tooltip>
                       </q-toggle>
                     </div>
@@ -463,6 +635,9 @@
                         flat
                         round
                         v-model="g.darkChoice"
+                        @update:model-value="
+                          siteCustomisationChanged({darkChoice: $event})
+                        "
                         :icon="$q.dark.isActive ? 'brightness_3' : 'wb_sunny'"
                         size="sm"
                       >
@@ -481,6 +656,9 @@
                         v-model="g.borderChoice"
                         :options="borderOptions"
                         label="Borders"
+                        @update:model-value="
+                          siteCustomisationChanged({borderChoice: $event})
+                        "
                       >
                         <q-tooltip
                           ><span v-text="$t('border_choices')"></span
@@ -495,7 +673,7 @@
                     <div class="col-8">
                       <lnbits-notifications-btn
                         v-if="g.user"
-                        pubkey="{{ WEBPUSH_PUBKEY }}"
+                        pubkey="g.settings.webpushPubkey"
                       ></lnbits-notifications-btn>
                     </div>
                   </div>
@@ -508,6 +686,9 @@
                         v-model="g.reactionChoice"
                         :options="reactionOptions"
                         label="Reactions"
+                        @update:model-value="
+                          siteCustomisationChanged({reactionChoice: $event})
+                        "
                       >
                         <q-tooltip
                           ><span v-text="$t('payment_reactions')"></span
@@ -515,6 +696,15 @@
                       </q-select>
                     </div>
                   </div>
+                  <q-card-section>
+                    <q-btn
+                      @click="resetThemeDefaults"
+                      :label="$t('reset_defaults')"
+                      filled
+                      color="primary"
+                      class="float-right q-mb-md"
+                    ></q-btn>
+                  </q-card-section>
                 </q-tab-panel>
                 <q-tab-panel name="notifications">
                   <q-card-section>
@@ -525,7 +715,7 @@
                         ></span>
                         <br />
                         <q-badge
-                          v-if="!LNBITS_NOSTR_CONFIGURED"
+                          v-if="!g.settings.nostrConfigured"
                           v-text="$t('not_connected')"
                         ></q-badge>
                       </div>
@@ -545,7 +735,7 @@
                         <span v-text="$t('notifications_chat_id')"></span>
                         <br />
                         <q-badge
-                          v-if="!LNBITS_TELEGRAM_CONFIGURED"
+                          v-if="!g.settings.telegramConfigured"
                           v-text="$t('not_connected')"
                         ></q-badge>
                       </div>
@@ -941,7 +1131,7 @@
                                 v-if="props.row.thumbnail_base64"
                                 target="_blank"
                                 style="color: inherit"
-                                :href="`/api/v1/assets/${props.row.id}/binary`"
+                                :href="`/api/v1/assets/${props.row.id}/data`"
                               >
                                 <q-img
                                   :src="
@@ -960,82 +1150,130 @@
                             <q-separator></q-separator>
 
                             <q-card-section>
-                              <q-btn-dropdown
-                                color="grey"
-                                dense
-                                outline
-                                no-caps
-                                :label="props.row.name"
-                                :icon="props.row.is_public ? 'public' : ''"
+                              <div
+                                class="row items-center no-wrap q-col-gutter-sm"
                               >
-                                <q-list>
-                                  <q-item
-                                    clickable
-                                    v-close-popup
-                                    @click="copyAssetLinkToClipboard(props.row)"
+                                <div class="col">
+                                  <q-btn-dropdown
+                                    color="grey"
+                                    dense
+                                    outline
+                                    no-caps
+                                    class="full-width"
+                                    :label="props.row.name"
+                                    :icon="props.row.is_public ? 'public' : ''"
                                   >
-                                    <q-item-section avatar>
-                                      <q-avatar icon="content_copy" />
-                                    </q-item-section>
-                                    <q-item-section>
-                                      <q-item-label>Copy Link</q-item-label>
-                                      <q-item-label caption
-                                        >Copy asset link to
-                                        clipboard</q-item-label
-                                      >
-                                    </q-item-section>
-                                  </q-item>
-
-                                  <q-item
-                                    clickable
-                                    v-close-popup
-                                    @click="toggleAssetPublicAccess(props.row)"
-                                  >
-                                    <q-item-section avatar>
-                                      <q-avatar
-                                        :icon="
-                                          props.row.is_public
-                                            ? 'public_off'
-                                            : 'public'
+                                    <q-list>
+                                      <q-item
+                                        clickable
+                                        v-close-popup
+                                        @click="
+                                          copyAssetLinkToClipboard(props.row)
                                         "
-                                        text-color="primary"
-                                      />
-                                    </q-item-section>
-                                    <q-item-section v-if="props.row.is_public">
-                                      <q-item-label>Unpublish</q-item-label>
-                                      <q-item-label caption
-                                        >Make this asset private</q-item-label
                                       >
-                                    </q-item-section>
-                                    <q-item-section v-else>
-                                      <q-item-label>Publish</q-item-label>
-                                      <q-item-label caption
-                                        >Make this asset public</q-item-label
-                                      >
-                                    </q-item-section>
-                                  </q-item>
+                                        <q-item-section avatar>
+                                          <q-avatar icon="content_copy" />
+                                        </q-item-section>
+                                        <q-item-section>
+                                          <q-item-label>Copy Link</q-item-label>
+                                          <q-item-label caption
+                                            >Copy asset link to
+                                            clipboard</q-item-label
+                                          >
+                                        </q-item-section>
+                                      </q-item>
 
-                                  <q-item
-                                    clickable
-                                    v-close-popup
-                                    @click="deleteAsset(props.row)"
-                                  >
-                                    <q-item-section avatar>
-                                      <q-avatar
-                                        icon="delete"
-                                        text-color="negative"
-                                      />
-                                    </q-item-section>
-                                    <q-item-section>
-                                      <q-item-label>Delete</q-item-label>
-                                      <q-item-label caption
-                                        >Permanently delete this
-                                        asset</q-item-label
+                                      <q-item
+                                        clickable
+                                        v-close-popup
+                                        @click="
+                                          toggleAssetPublicAccess(props.row)
+                                        "
                                       >
-                                    </q-item-section>
-                                  </q-item>
-                                </q-list>
-                              </q-btn-dropdown>
+                                        <q-item-section avatar>
+                                          <q-avatar
+                                            :icon="
+                                              props.row.is_public
+                                                ? 'public_off'
+                                                : 'public'
+                                            "
+                                            text-color="primary"
+                                          />
+                                        </q-item-section>
+                                        <q-item-section
+                                          v-if="props.row.is_public"
+                                        >
+                                          <q-item-label>Unpublish</q-item-label>
+                                          <q-item-label caption
+                                            >Make this asset
+                                            private</q-item-label
+                                          >
+                                        </q-item-section>
+                                        <q-item-section v-else>
+                                          <q-item-label>Publish</q-item-label>
+                                          <q-item-label caption
+                                            >Make this asset
+                                            public</q-item-label
+                                          >
+                                        </q-item-section>
+                                      </q-item>
+
+                                      <q-item
+                                        clickable
+                                        v-close-popup
+                                        @click="deleteAsset(props.row)"
+                                      >
+                                        <q-item-section avatar>
+                                          <q-avatar
+                                            icon="delete"
+                                            text-color="negative"
+                                          />
+                                        </q-item-section>
+                                        <q-item-section>
+                                          <q-item-label>Delete</q-item-label>
+                                          <q-item-label caption
+                                            >Permanently delete this
+                                            asset</q-item-label
+                                          >
+                                        </q-item-section>
+                                      </q-item>
+                                    </q-list>
+                                  </q-btn-dropdown>
+                                </div>
+                                <div class="col-auto">
+                                  <q-btn
+                                    type="a"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    color="primary"
+                                    dense
+                                    flat
+                                    round
+                                    icon="image"
+                                    :href="`/api/v1/assets/${props.row.id}/data`"
+                                  >
+                                    <q-tooltip>Full image</q-tooltip>
+                                  </q-btn>
+                                </div>
+                                <div
+                                  class="col-auto"
+                                  v-if="props.row.thumbnail_base64"
+                                >
+                                  <q-btn
+                                    type="a"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    color="secondary"
+                                    dense
+                                    flat
+                                    round
+                                    icon="photo_size_select_small"
+                                    :href="`/api/v1/assets/${props.row.id}/thumbnail`"
+                                  >
+                                    <q-tooltip>Thumbnail</q-tooltip>
+                                  </q-btn>
+                                </div>
+                              </div>
                             </q-card-section>
                           </q-card>
                         </div>

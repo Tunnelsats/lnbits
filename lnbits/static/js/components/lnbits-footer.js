@@ -1,15 +1,11 @@
 window.app.component('lnbits-footer', {
   template: '#lnbits-footer',
-  mixins: [window.windowMixin],
   computed: {
-    version() {
-      return this.LNBITS_VERSION || 'unknown version'
-    },
     title() {
-      return `${this.SITE_TITLE}, ${this.SITE_TAGLINE}`
+      return `${this.g.settings.siteTitle}, ${this.g.settings.siteTagline}`
     },
-    showFooter() {
-      return this.LNBITS_SHOW_HOME_PAGE_ELEMENTS == true
+    version() {
+      return this.$t('lnbits_version') + ': ' + this.g.settings.version
     }
   }
 })

@@ -4,13 +4,15 @@ import json
 from collections.abc import Callable
 from http import HTTPStatus
 from time import time
+from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi_sso.sso.base import OpenID, SSOBase
 from loguru import logger
 
+from lnbits.core.crud.settings import set_settings_field
 from lnbits.core.crud.users import (
     get_user_access_control_lists,
     update_user_access_control_list,
@@ -25,11 +27,16 @@ from lnbits.core.models.users import (
     UpdateAccessControlList,
 )
 from lnbits.core.services import create_user_account
-from lnbits.core.services.users import update_user_account
+from lnbits.core.services.users import (
+    check_register_activation_settings,
+    update_user_account,
+)
 from lnbits.decorators import (
     access_token_payload,
     check_account_exists,
+    check_admin,
     check_user_exists,
+    optional_user_id,
 )
 from lnbits.helpers import (
     create_access_token,
@@ -84,6 +91,7 @@ async def login(data: LoginUsernamePassword) -> JSONResponse:
     account = await get_account_by_username_or_email(data.username)
     if not account or not account.verify_password(data.password):
         raise HTTPException(HTTPStatus.UNAUTHORIZED, "Invalid credentials.")
+
     return _auth_success_response(account.username, account.id, account.email)
 
 
@@ -92,7 +100,7 @@ async def nostr_login(request: Request) -> JSONResponse:
     if not settings.is_auth_method_allowed(AuthMethods.nostr_auth_nip98):
         raise HTTPException(HTTPStatus.FORBIDDEN, "Login with Nostr Auth not allowed.")
     event = _nostr_nip98_event(request)
-    account = await get_account_by_pubkey(event["pubkey"])
+    account = await get_account_by_pubkey(event["pubkey"], active_only=False)
     if not account:
         account = Account(
             id=uuid4().hex,
@@ -100,6 +108,8 @@ async def nostr_login(request: Request) -> JSONResponse:
             extra=UserExtra(provider="nostr"),
         )
         await create_user_account(account)
+    if not account.activated:
+        raise HTTPException(HTTPStatus.UNAUTHORIZED, "User is not activated.")
     return _auth_success_response(account.username or "", account.id, account.email)
 
 
@@ -118,6 +128,79 @@ async def login_usr(data: LoginUsr) -> JSONResponse:
             HTTPStatus.FORBIDDEN, "Admin users cannot login with user id only."
         )
     return _auth_success_response(account.username, account.id, account.email)
+
+
+@auth_router.post("/impersonate", description="Login via the User ID of another user")
+async def impersonate_user(
+    data: LoginUsr,
+    user: User = Depends(check_admin),
+    cookie_access_token: Annotated[str | None, Cookie()] = None,
+) -> JSONResponse:
+    if not cookie_access_token:
+        raise HTTPException(
+            HTTPStatus.UNAUTHORIZED, "Only cookie based impersonation is allowed."
+        )
+    if data.usr == user.id:
+        raise HTTPException(HTTPStatus.FORBIDDEN, "You cannot impersonate yourself.")
+    if settings.is_admin_user(data.usr):
+        # this check includes the superuser
+        raise HTTPException(
+            HTTPStatus.FORBIDDEN, "You cannot impersonate another admin user."
+        )
+
+    account = await get_account(data.usr)
+    if not account:
+        raise HTTPException(HTTPStatus.UNAUTHORIZED, "User ID does not exist.")
+
+    response = _auth_success_response(account.username, account.id, account.email)
+
+    max_age = settings.auth_token_expire_minutes * 60
+    response.set_cookie(
+        "admin_access_token",
+        cookie_access_token,
+        httponly=True,
+        secure=settings.auth_https_only,
+        samesite="lax",
+        max_age=max_age,
+    )
+    response.set_cookie(
+        "is_lnbits_user_impersonated",
+        "true",
+        secure=settings.auth_https_only,
+        samesite="lax",
+        max_age=max_age,
+    )
+    return response
+
+
+@auth_router.delete(
+    "/impersonate", description="Stop impersonation and go back to admin"
+)
+async def stop_impersonate_user(
+    user: User = Depends(check_user_exists),
+    admin_access_token: Annotated[str | None, Cookie()] = None,
+) -> JSONResponse:
+    if not admin_access_token:
+        raise HTTPException(
+            HTTPStatus.UNAUTHORIZED,
+            "No admin access token found to stop impersonation.",
+        )
+    response = JSONResponse(
+        {"access_token": admin_access_token, "token_type": "bearer"}
+    )
+    max_age = settings.auth_token_expire_minutes * 60
+    response.set_cookie(
+        "cookie_access_token",
+        admin_access_token,
+        httponly=True,
+        secure=settings.auth_https_only,
+        samesite="lax",
+        max_age=max_age,
+    )
+    response.delete_cookie("admin_access_token")
+    response.delete_cookie("is_access_token_expired")
+    response.delete_cookie("is_lnbits_user_impersonated")
+    return response
 
 
 @auth_router.get("/acl")
@@ -238,7 +321,10 @@ async def api_delete_user_api_token(
 
 @auth_router.get("/{provider}", description="SSO Provider")
 async def login_with_sso_provider(
-    request: Request, provider: str, user_id: str | None = None
+    request: Request,
+    provider: str,
+    user_id: str | None,
+    auth_user_id: str | None = Depends(optional_user_id),
 ):
     provider_sso = _new_sso(provider)
     if not provider_sso:
@@ -246,6 +332,8 @@ async def login_with_sso_provider(
             HTTPStatus.FORBIDDEN,
             f"Login by '{provider}' not allowed.",
         )
+    if user_id and user_id != auth_user_id:
+        raise HTTPException(HTTPStatus.FORBIDDEN, "User ID mismatch.")
 
     provider_sso.redirect_uri = str(request.base_url) + f"api/v1/auth/{provider}/token"
     with provider_sso:
@@ -266,7 +354,11 @@ async def handle_oauth_token(request: Request, provider: str) -> RedirectRespons
         userinfo = await provider_sso.verify_and_process(request)
         if not userinfo:
             raise HTTPException(HTTPStatus.UNAUTHORIZED, "Invalid user info.")
-        user_id = decrypt_internal_message(provider_sso.state)
+        if provider_sso.state is None or provider_sso.state == "null":
+            user_id = None
+        else:
+            user_id = decrypt_internal_message(provider_sso.state)
+
     request.session.pop("user", None)
     return await _handle_sso_login(userinfo, user_id)
 
@@ -298,11 +390,13 @@ async def register(data: RegisterUser) -> JSONResponse:
     if not is_valid_username(data.username):
         raise HTTPException(HTTPStatus.BAD_REQUEST, "Invalid username.")
 
-    if await get_account_by_username(data.username):
+    if await get_account_by_username(data.username, active_only=False):
         raise HTTPException(HTTPStatus.BAD_REQUEST, "Username already exists.")
 
     if data.email and not is_valid_email_address(data.email):
         raise HTTPException(HTTPStatus.BAD_REQUEST, "Invalid email.")
+
+    await check_register_activation_settings(data)
 
     account = Account(
         id=uuid4().hex,
@@ -408,7 +502,7 @@ async def reset_password(data: ResetUserPassword) -> JSONResponse:
     return _auth_success_response(account.username, user_id, account.email)
 
 
-@auth_router.put("/update")
+@auth_router.patch("")
 async def update(
     data: UpdateUser, account: Account = Depends(check_account_exists)
 ) -> User | None:
@@ -424,19 +518,54 @@ async def update(
     return await get_user_from_account(account)
 
 
+@auth_router.patch("/ui")
+async def update_ui_customization(
+    req: Request, account: Account = Depends(check_account_exists)
+) -> Account:
+    ui_customization = await req.json()
+    account.ui_customization = {**(account.ui_customization or {}), **ui_customization}
+
+    if len(account.ui_customization or {}) > 1000 * 1024:
+        raise HTTPException(
+            HTTPStatus.BAD_REQUEST, "UI customization too large. Drop some fields."
+        )
+
+    await update_user_account(account)
+    return account
+
+
 @auth_router.put("/first_install")
 async def first_install(data: UpdateSuperuserPassword) -> JSONResponse:
     if not settings.first_install:
         raise HTTPException(HTTPStatus.FORBIDDEN, "This is not your first install")
+
+    if settings.first_install_token:
+        if not data.first_install_token:
+            raise HTTPException(HTTPStatus.UNAUTHORIZED, "Missing first_install_token.")
+        if settings.first_install_token != data.first_install_token:
+            raise HTTPException(HTTPStatus.UNAUTHORIZED, "Invalid first_install_token.")
+
+    account = await get_account_by_username(data.username, False)
+    if account:
+        raise HTTPException(HTTPStatus.BAD_REQUEST, "Username already exists.")
+
     account = await get_account(settings.super_user)
     if not account:
         raise HTTPException(HTTPStatus.INTERNAL_SERVER_ERROR, "Superuser not found.")
+
     account.username = data.username
     account.extra = account.extra or UserExtra()
     account.extra.provider = "lnbits"
     account.hash_password(data.password)
     await update_account(account)
     settings.first_install = False
+
+    # only confrm it after the super user has been successfully updated
+    if settings.first_install_token:
+        settings.first_install_token_confirmed = data.first_install_token
+        await set_settings_field(
+            "first_install_token_confirmed", data.first_install_token
+        )
     return _auth_success_response(account.username, account.id, account.email)
 
 
@@ -446,7 +575,7 @@ async def _handle_sso_login(userinfo: OpenID, verified_user_id: str | None = Non
         raise HTTPException(HTTPStatus.BAD_REQUEST, "Invalid email.")
 
     redirect_path = "/wallet"
-    account = await get_account_by_email(email)
+    account = await get_account_by_email(email, active_only=False)
 
     if verified_user_id:
         if account:
@@ -465,7 +594,7 @@ async def _handle_sso_login(userinfo: OpenID, verified_user_id: str | None = Non
             id=uuid4().hex, email=email, extra=UserExtra(email_verified=True)
         )
         await create_user_account(account)
-    return _auth_redirect_response(redirect_path, email)
+    return _auth_redirect_response(redirect_path, account.id, email)
 
 
 def _auth_success_response(
@@ -480,9 +609,20 @@ def _auth_success_response(
     max_age = settings.auth_token_expire_minutes * 60
     response = JSONResponse({"access_token": access_token, "token_type": "bearer"})
     response.set_cookie(
-        "cookie_access_token", access_token, httponly=True, max_age=max_age
+        "cookie_access_token",
+        access_token,
+        httponly=True,
+        secure=settings.auth_https_only,
+        samesite="lax",
+        max_age=max_age,
     )
-    response.set_cookie("is_lnbits_user_authorized", "true", max_age=max_age)
+    response.set_cookie(
+        "is_lnbits_user_authorized",
+        "true",
+        secure=settings.auth_https_only,
+        samesite="lax",
+        max_age=max_age,
+    )
     response.delete_cookie("is_access_token_expired")
 
     return response
@@ -499,15 +639,28 @@ def _auth_api_token_response(
     )
 
 
-def _auth_redirect_response(path: str, email: str) -> RedirectResponse:
-    payload = AccessTokenPayload(sub="" or "", email=email, auth_time=int(time()))
+def _auth_redirect_response(path: str, user_id: str, email: str) -> RedirectResponse:
+    payload = AccessTokenPayload(
+        usr=user_id, sub="", email=email, auth_time=int(time())
+    )
     access_token = create_access_token(data=payload.dict())
     max_age = settings.auth_token_expire_minutes * 60
     response = RedirectResponse(path)
     response.set_cookie(
-        "cookie_access_token", access_token, httponly=True, max_age=max_age
+        "cookie_access_token",
+        access_token,
+        httponly=True,
+        secure=settings.auth_https_only,
+        samesite="lax",
+        max_age=max_age,
     )
-    response.set_cookie("is_lnbits_user_authorized", "true", max_age=max_age)
+    response.set_cookie(
+        "is_lnbits_user_authorized",
+        "true",
+        secure=settings.auth_https_only,
+        samesite="lax",
+        max_age=max_age,
+    )
     response.delete_cookie("is_access_token_expired")
     return response
 
@@ -527,7 +680,10 @@ def _new_sso(provider: str) -> SSOBase | None:
 
         sso_provider_class = _find_auth_provider_class(provider)
         sso_provider = sso_provider_class(
-            client_id, client_secret, None, allow_insecure_http=True
+            client_id,
+            client_secret,
+            None,
+            allow_insecure_http=not settings.auth_https_only,
         )
         if (
             discovery_url

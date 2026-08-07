@@ -1,4 +1,6 @@
 import asyncio
+import copy
+import inspect
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -14,16 +16,21 @@ from lnbits.core.crud import (
     delete_account,
     get_account_by_username,
     get_payment,
+    get_user,
     update_payment,
 )
-from lnbits.core.crud.users import get_user_from_account
 from lnbits.core.models import Account, CreateInvoice, PaymentState, User
 from lnbits.core.models.users import UpdateSuperuserPassword
 from lnbits.core.services import create_user_account, update_wallet_balance
 from lnbits.core.services.payments import create_wallet_invoice
 from lnbits.core.views.auth_api import first_install
 from lnbits.db import DB_TYPE, SQLITE, Database
-from lnbits.settings import AuthMethods, FiatProviderLimits, Settings
+from lnbits.settings import (
+    AuthMethods,
+    EditableSettings,
+    FiatProviderLimits,
+    Settings,
+)
 from lnbits.settings import settings as lnbits_settings
 from lnbits.wallets.fake import FakeWallet
 from tests.helpers import (
@@ -33,6 +40,23 @@ from tests.helpers import (
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 ADMIN_USER_ID = uuid4().hex
+# Snapshot the initialized module settings instead of a fresh Settings() instance.
+# The module settings include runtime-populated values like `version`.
+_PURE_SETTINGS = copy.deepcopy(lnbits_settings)
+_PURE_SETTINGS_FIELDS = tuple(
+    sorted(
+        {
+            field_name
+            for field_name in Settings.readonly_fields()
+            if field_name != "super_user"
+        }
+        | {
+            name
+            for name in inspect.signature(EditableSettings).parameters
+            if not name.startswith("_")
+        }
+    )
+)
 
 
 @pytest.fixture(scope="session")
@@ -43,6 +67,7 @@ def anyio_backend():
 @pytest.fixture(scope="session")
 def settings():
     # override settings for tests
+    lnbits_settings.auth_https_only = False
     lnbits_settings.lnbits_admin_extensions = []
     lnbits_settings.lnbits_data_folder = "./tests/data"
     lnbits_settings.lnbits_admin_ui = True
@@ -71,6 +96,7 @@ async def app(settings: Settings):
                 username="superadmin",
                 password="secret1234",
                 password_repeat="secret1234",
+                first_install_token=settings.first_install_token,
             )
         )
 
@@ -114,10 +140,10 @@ async def user_alan():
 
 @pytest.fixture(scope="session")
 async def admin_user():
-    username = "admin"
-    account = await get_account_by_username(username)
-    if account:
-        return await get_user_from_account(account)
+    username = "admin_" + uuid4().hex[:8]
+    user = await get_user(ADMIN_USER_ID)
+    if user:
+        return user
 
     account = Account(
         id=ADMIN_USER_ID,
@@ -326,7 +352,21 @@ async def new_user(username: str | None = None) -> User:
     return user
 
 
+def _restore_pure_settings(settings: Settings):
+    for field_name in _PURE_SETTINGS_FIELDS:
+        setattr(
+            settings, field_name, copy.deepcopy(getattr(_PURE_SETTINGS, field_name))
+        )
+
+
 def _settings_cleanup(settings: Settings):
+    _restore_pure_settings(settings)
+    settings.auth_https_only = False
+    settings.lnbits_data_folder = "./tests/data"
+    settings.bundle_assets = True
+    settings.lnbits_admin_ui = True
+    settings.lnbits_extensions_default_install = []
+    settings.lnbits_extensions_deactivate_all = True
     settings.lnbits_allow_new_accounts = True
     settings.lnbits_allowed_users = []
     settings.auth_allowed_methods = AuthMethods.all()
@@ -341,3 +381,7 @@ def _settings_cleanup(settings: Settings):
     settings.lnbits_max_outgoing_payment_amount_sats = 10_000_000_100
     settings.lnbits_max_incoming_payment_amount_sats = 10_000_000_200
     settings.stripe_limits = FiatProviderLimits()
+    settings.lnbits_require_user_activation = False
+    settings.lnbits_user_activation_by_invitation_code = False
+    settings.lnbits_register_reusable_activation_code = ""
+    settings.lnbits_register_one_time_activation_codes = []

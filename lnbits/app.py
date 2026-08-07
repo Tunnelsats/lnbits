@@ -40,6 +40,7 @@ from lnbits.core.tasks import (
 )
 from lnbits.exceptions import register_exception_handlers
 from lnbits.helpers import version_parse
+from lnbits.llms_txt import create_llms_txt_route
 from lnbits.settings import settings
 from lnbits.tasks import (
     cancel_all_tasks,
@@ -65,6 +66,7 @@ from .middleware import (
     InstalledExtensionMiddleware,
     add_first_install_middleware,
     add_ip_block_middleware,
+    add_profiler_middleware,
     add_ratelimit_middleware,
 )
 from .tasks import internal_invoice_listener, invoice_listener, run_interval
@@ -100,6 +102,9 @@ async def startup(app: FastAPI):
 
     # register core routes
     init_core_routers(app)
+
+    # register llms.txt endpoint for AI agents
+    create_llms_txt_route(app)
 
     # initialize tasks
     register_async_tasks()
@@ -195,6 +200,9 @@ def create_app() -> FastAPI:
     add_ratelimit_middleware(app)
 
     register_exception_handlers(app)
+
+    if settings.profiler:
+        add_profiler_middleware(app)
 
     return app
 
@@ -468,7 +476,12 @@ def register_async_tasks() -> None:
     create_permanent_task(wait_for_audit_data)
     create_permanent_task(wait_notification_messages)
 
-    create_permanent_task(run_interval(30 * 60, check_pending_payments))
+    create_permanent_task(
+        run_interval(
+            settings.lnbits_funding_source_pending_interval_seconds,
+            check_pending_payments,
+        )
+    )
     create_permanent_task(invoice_listener)
     create_permanent_task(internal_invoice_listener)
     create_permanent_task(cache.invalidate_forever)

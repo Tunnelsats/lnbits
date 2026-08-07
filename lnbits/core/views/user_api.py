@@ -20,6 +20,8 @@ from lnbits.core.crud import (
     update_admin_settings,
     update_wallet,
 )
+from lnbits.core.crud.users import clear_user_id_cache, get_account, update_account
+from lnbits.core.crud.wallets import delete_wallet_by_id
 from lnbits.core.models import (
     AccountFilters,
     AccountOverview,
@@ -72,7 +74,7 @@ async def api_get_users(
     summary="Get user by Id",
 )
 async def api_get_user(user_id: str) -> User:
-    user = await get_user(user_id)
+    user = await get_user(user_id, active_only=False)
     if not user:
         raise HTTPException(HTTPStatus.NOT_FOUND, "User not found.")
     return user
@@ -157,11 +159,8 @@ async def api_users_delete_user(
     user_id: str, account: Account = Depends(check_admin)
 ) -> SimpleStatus:
     wallets = await get_wallets(user_id, deleted=False)
-    if len(wallets) > 0:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail="Cannot delete user with wallets.",
-        )
+    for wallet in wallets:
+        await delete_wallet_by_id(wallet.id)
 
     if user_id == settings.super_user:
         raise HTTPException(
@@ -199,7 +198,7 @@ async def api_users_reset_password(user_id: str) -> str:
     return f"reset_key_{reset_key_b64}"
 
 
-@users_router.get(
+@users_router.put(
     "/user/{user_id}/admin",
     dependencies=[Depends(check_super_user)],
     name="Give or revoke admin permsisions to a user",
@@ -222,9 +221,46 @@ async def api_users_toggle_admin(user_id: str) -> SimpleStatus:
     )
 
 
+@users_router.put(
+    "/user/{user_id}/activate",
+    name="Activate or deactivate a user",
+)
+async def api_users_toggle_activated(
+    user_id: str, admin_account: Account = Depends(check_admin)
+) -> SimpleStatus:
+    if user_id == settings.super_user:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Cannot deactivate super user.",
+        )
+    if user_id == admin_account.id:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="You cannot deactivate yourself.",
+        )
+
+    if settings.is_admin_user(user_id):
+        settings.lnbits_admin_users.remove(user_id)
+
+    user_account = await get_account(user_id, active_only=False)
+    if not user_account:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail="User not found.",
+        )
+    user_account.activated = not user_account.activated
+    await update_account(user_account)
+    await clear_user_id_cache(user_id)
+
+    return SimpleStatus(
+        success=True,
+        message=f"User {'activated' if user_account.activated else 'deactivated'}.",
+    )
+
+
 @users_router.get("/user/{user_id}/wallet", name="Get wallets for user")
 async def api_users_get_user_wallet(user_id: str) -> list[Wallet]:
-    return await get_wallets(user_id)
+    return await get_wallets(user_id, deleted=None)
 
 
 @users_router.post("/user/{user_id}/wallet", name="Create a new wallet for user")
@@ -247,7 +283,7 @@ async def api_users_create_user_wallet(
     "/user/{user_id}/wallet/{wallet}/undelete", name="Reactivate deleted wallet"
 )
 async def api_users_undelete_user_wallet(user_id: str, wallet: str) -> SimpleStatus:
-    wal = await get_wallet(wallet)
+    wal = await get_wallet(wallet, deleted=True)
     if not wal:
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,

@@ -1,6 +1,5 @@
 window.app.component('lnbits-home-logos', {
   template: '#lnbits-home-logos',
-  mixins: [window.windowMixin],
   data() {
     return {
       logos: [
@@ -96,8 +95,8 @@ window.app.component('lnbits-home-logos', {
     showLogos() {
       return (
         this.g.isSatsDenomination &&
-        this.SITE_TITLE == 'LNbits' &&
-        this.LNBITS_SHOW_HOME_PAGE_ELEMENTS == true
+        this.g.settings.siteTitle == 'LNbits' &&
+        this.g.settings.showHomePageElements == true
       )
     }
   }

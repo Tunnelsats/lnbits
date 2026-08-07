@@ -289,10 +289,36 @@ async def btc_rates(currency: str) -> list[tuple[str, float]]:
     return apply_trimmed_mean_filter(all_rates)
 
 
+async def btc_price_from_aggregator(currency: str) -> float | None:
+    url = settings.lnbits_price_aggregator_url.rstrip("/")
+    try:
+        headers = {"User-Agent": settings.user_agent}
+        async with httpx.AsyncClient(headers=headers) as client:
+            r = await client.get(f"{url}/rate/{currency.upper()}", timeout=3)
+            r.raise_for_status()
+            data = r.json()
+            median = data.get("rates", {}).get("median")
+            if median:
+                return float(median)
+    except Exception as e:
+        logger.warning(f"Failed to fetch price from aggregator {url}: {e}")
+    return None
+
+
 async def btc_price(currency: str) -> float:
+    if (
+        settings.lnbits_price_aggregator_enabled
+        and settings.lnbits_price_aggregator_url
+    ):
+        price = await btc_price_from_aggregator(currency)
+        if price:
+            return price
+        logger.warning("Price aggregator failed, falling back to exchange providers.")
+
     rates = await btc_rates(currency)
     if not rates:
-        raise ValueError("Could not fetch any Bitcoin price.")
+        logger.warning("Could not fetch any Bitcoin price.")
+        return 0.0
     elif len(rates) == 1:
         logger.warning("Could only fetch one Bitcoin price.")
 
@@ -306,7 +332,8 @@ async def get_fiat_rate_and_price_satoshis(currency: str) -> tuple[float, float]
         f"btc-price-{currency}",
         settings.lnbits_exchange_rate_cache_seconds,
     )
-    return float(100_000_000 / price), price
+    rate = float(100_000_000 / price) if price > 0 else 0.0
+    return rate, price
 
 
 async def get_fiat_rate_satoshis(currency: str) -> float:
@@ -316,9 +343,13 @@ async def get_fiat_rate_satoshis(currency: str) -> float:
 
 async def fiat_amount_as_satoshis(amount: float, currency: str) -> int:
     rate = await get_fiat_rate_satoshis(currency)
-    return int(amount * (rate))
+    if rate > 0:
+        return int(amount * rate)
+    raise ValueError(f"Could not get exchange rate for {currency}.")
 
 
 async def satoshis_amount_as_fiat(amount: float, currency: str) -> float:
     rate = await get_fiat_rate_satoshis(currency)
-    return float(amount / rate)
+    if rate > 0:
+        return float(amount / rate)
+    raise ValueError(f"Could not get exchange rate for {currency}.")

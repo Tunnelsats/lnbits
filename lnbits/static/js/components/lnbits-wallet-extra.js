@@ -1,9 +1,10 @@
 window.app.component('lnbits-wallet-extra', {
   template: '#lnbits-wallet-extra',
-  mixins: [window.windowMixin],
   props: ['chartConfig'],
-  data() {
-    return {}
+  computed: {
+    exportUrl() {
+      return `${window.location.origin}/wallet?usr=${this.g.user.id}&wal=${this.g.wallet.id}`
+    }
   },
   methods: {
     handleSendLnurl(lnurl) {
@@ -70,6 +71,10 @@ window.app.component('lnbits-wallet-extra', {
             'lnbits.exchangeRate.' + this.g.wallet.currency,
             this.g.exchangeRate
           )
+          if (this.g.exchangeRate <= 0) {
+            this.g.fiatTracking = false
+            this.g.isFiatPriority = false
+          }
         })
         .catch(e => console.error(e))
     }

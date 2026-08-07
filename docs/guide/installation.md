@@ -11,7 +11,7 @@ nav_order: 1
   </picture>
 </a>
 
-![phase: stable](https://img.shields.io/badge/phase-stable-2EA043) ![License: MIT](https://img.shields.io/badge/License-MIT-blue) ![PRs: welcome](https://img.shields.io/badge/PRs-Welcome-yellow) [![explore: LNbits extensions](https://img.shields.io/badge/explore-LNbits%20extensions-10B981)](https://extensions.lnbits.com/) [<img src="https://img.shields.io/badge/community_chat-Telegram-24A1DE">](https://t.me/lnbits) <img src="https://img.shields.io/badge/supported_by-%3E__OpenSats-f97316">
+![phase: stable](https://img.shields.io/badge/phase-stable-2EA043) ![License: MIT](https://img.shields.io/badge/License-MIT-blue) ![PRs: welcome](https://img.shields.io/badge/PRs-Welcome-yellow) [![explore: LNbits extensions](https://img.shields.io/badge/explore-LNbits%20extensions-10B981)](https://extensions.lnbits.com/) [<img src="https://img.shields.io/badge/community_chat-Telegram-24A1DE">](https://t.me/lnbits)
 
 # Basic installation
 
@@ -51,7 +51,7 @@ nav_order: 1
 sudo apt-get install jq libfuse2
 wget $(curl -s https://api.github.com/repos/lnbits/lnbits/releases/latest | jq -r '.assets[] | select(.name | endswith(".AppImage")) | .browser_download_url') -O LNbits-latest.AppImage
 chmod +x LNbits-latest.AppImage
-LNBITS_ADMIN_UI=true HOST=0.0.0.0 PORT=5000 ./LNbits-latest.AppImage # most system settings are now in the admin UI, but pass additional .env variables here
+LNBITS_ADMIN_UI=true HOST=0.0.0.0 PORT=5000 AUTH_HTTPS_ONLY=false ./LNbits-latest.AppImage # most system settings are now in the admin UI, but pass additional .env variables here
 ```
 
 - LNbits will create a folder for DB and extension files **in the same directory** as the AppImage.
@@ -285,10 +285,7 @@ but you can also set the env variables or pass command line arguments:
 
 ```sh
 # .env variables are currently passed when running, but LNbits can be managed with the admin UI.
-LNBITS_ADMIN_UI=true ./result/bin/lnbits --port 9000 --host 0.0.0.0
-
-# Once you have created a user, you can set as the super_user
-SUPER_USER=be54db7f245346c8833eaa430e1e0405 LNBITS_ADMIN_UI=true ./result/bin/lnbits --port 9000
+LNBITS_ADMIN_UI=true AUTH_HTTPS_ONLY=false ./result/bin/lnbits --port 9000 --host 0.0.0.0
 ```
 
 > ![NOTE](https://img.shields.io/badge/NOTE-3b82f6?labelColor=494949)

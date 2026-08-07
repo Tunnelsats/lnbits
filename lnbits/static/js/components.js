@@ -3,44 +3,38 @@ window.app.component(QrcodeVue)
 window.app.component('lnbits-extension-rating', {
   template: '#lnbits-extension-rating',
   name: 'lnbits-extension-rating',
-  props: ['rating']
-})
-
-window.app.component('lnbits-fsat', {
-  template: '<span>{{ fsat }}</span>',
   props: {
-    amount: {
+    rating: {
       type: Number,
       default: 0
+    },
+    count: {
+      type: Number,
+      default: null
+    },
+    clickable: {
+      type: Boolean,
+      default: false
     }
   },
   computed: {
-    fsat() {
-      return LNbits.utils.formatSat(this.amount)
+    displayRating() {
+      return Math.round((this.rating || 0) * 2) / 2
+    },
+    hasData() {
+      return this.count !== null && this.count !== undefined
+    }
+  },
+  methods: {
+    handleClick() {
+      if (!this.clickable) return
+      this.$emit('click')
     }
   }
 })
 
 window.app.component('lnbits-manage', {
-  mixins: [window.windowMixin],
   template: '#lnbits-manage',
-  computed: {
-    showAdmin() {
-      return this.LNBITS_ADMIN_UI
-    },
-    showUsers() {
-      return this.LNBITS_ADMIN_UI
-    },
-    showNode() {
-      return this.LNBITS_NODE_UI
-    },
-    showAudit() {
-      return this.LNBITS_AUDIT_ENABLED
-    },
-    showExtensions() {
-      return this.LNBITS_EXTENSIONS_DEACTIVATE_ALL === false
-    }
-  },
   methods: {
     isActive(path) {
       return window.location.pathname === path
@@ -54,10 +48,8 @@ window.app.component('lnbits-manage', {
 })
 
 window.app.component('lnbits-payment-details', {
-  mixins: [window.windowMixin],
   template: '#lnbits-payment-details',
   props: ['payment'],
-  mixins: [window.windowMixin],
   computed: {
     hasPreimage() {
       return (
@@ -101,7 +93,6 @@ window.app.component('lnbits-payment-details', {
 })
 
 window.app.component('lnbits-lnurlpay-success-action', {
-  mixins: [window.windowMixin],
   template: '#lnbits-lnurlpay-success-action',
   props: ['payment', 'success_action'],
   data() {
@@ -121,7 +112,6 @@ window.app.component('lnbits-lnurlpay-success-action', {
 
 window.app.component('lnbits-notifications-btn', {
   template: '#lnbits-notifications-btn',
-  mixins: [window.windowMixin],
   props: ['pubkey'],
   data() {
     return {
@@ -292,7 +282,6 @@ window.app.component('lnbits-notifications-btn', {
 
 window.app.component('lnbits-dynamic-fields', {
   template: '#lnbits-dynamic-fields',
-  mixins: [window.windowMixin],
   props: ['options', 'modelValue'],
   data() {
     return {
@@ -325,7 +314,6 @@ window.app.component('lnbits-dynamic-fields', {
 
 window.app.component('lnbits-dynamic-chips', {
   template: '#lnbits-dynamic-chips',
-  mixins: [window.windowMixin],
   props: ['modelValue'],
   data() {
     return {
@@ -356,7 +344,6 @@ window.app.component('lnbits-dynamic-chips', {
 
 window.app.component('lnbits-update-balance', {
   template: '#lnbits-update-balance',
-  mixins: [window.windowMixin],
   props: ['wallet_id', 'small_btn'],
   computed: {
     admin() {
@@ -395,7 +382,6 @@ window.app.component('lnbits-update-balance', {
 
 window.app.component('user-id-only', {
   template: '#user-id-only',
-  mixins: [window.windowMixin],
   props: {
     allowed_new_users: Boolean,
     authAction: String,
@@ -439,7 +425,6 @@ window.app.component('user-id-only', {
 
 window.app.component('username-password', {
   template: '#username-password',
-  mixins: [window.windowMixin],
   props: {
     allowed_new_users: Boolean,
     authMethods: Array,
@@ -447,22 +432,29 @@ window.app.component('username-password', {
     username: String,
     password_1: String,
     password_2: String,
+    invitationCode: String,
     resetKey: String
   },
+
   data() {
     return {
       oauth: [
         'nostr-auth-nip98',
         'google-auth',
         'github-auth',
-        'keycloak-auth'
+        'keycloak-auth',
+        'oidc-auth'
       ],
       username: this.userName,
       password: this.password_1,
       passwordRepeat: this.password_2,
       reset_key: this.resetKey,
-      keycloakOrg: LNBITS_AUTH_KEYCLOAK_ORG || 'Keycloak',
-      keycloakIcon: LNBITS_AUTH_KEYCLOAK_ICON
+      confirmationMethod: 'code',
+      confirmationEmail: '',
+      confirmationCode: this.invitationCode || '',
+      showConfirmationCode: false,
+      showPwd: false,
+      showPwdRepeat: false
     }
   },
   methods: {
@@ -475,6 +467,7 @@ window.app.component('username-password', {
       this.$emit('update:userName', this.username)
       this.$emit('update:password_1', this.password)
       this.$emit('update:password_2', this.passwordRepeat)
+      this.$emit('update:invitationCode', this.confirmationCode)
       this.$emit('register')
     },
     reset() {
@@ -566,6 +559,25 @@ window.app.component('username-password', {
   computed: {
     showOauth() {
       return this.oauth.some(m => this.authMethods.includes(m))
+    },
+    disableRegister() {
+      const usernameOK = !!this.username
+      const passwordOK = !!this.password && this.password.length >= 8
+      const passwordsMatch = this.password === this.passwordRepeat
+      const codeOk =
+        this.confirmationMethodsCount === 0 ||
+        this.confirmationMethod !== 'code' ||
+        this.confirmationCode.length > 0
+
+      return !usernameOK || !passwordOK || !passwordsMatch || !codeOk
+    },
+    confirmationMethodsCount() {
+      const methods = [
+        this.g.settings.userActivationByEmail,
+        this.g.settings.userActivationByPayment,
+        this.g.settings.userActivationByInvitationCode
+      ]
+      return methods.filter(Boolean).length
     }
   },
   created() {}
@@ -677,18 +689,15 @@ window.app.component('lnbits-stat', {
 
 window.app.component('lnbits-node-qrcode', {
   props: ['info'],
-  mixins: [window.windowMixin],
   template: `
     <q-card class="my-card">
       <q-card-section>
         <div class="text-h6">
           <div style="text-align: center">
-            <vue-qrcode
-              :value="info.addresses[0]"
-              :options="{width: 250}"
+            <lnbits-qrcode
               v-if='info.addresses[0]'
-              class="rounded-borders"
-            ></vue-qrcode>
+              :value="info.addresses[0]"
+            ></lnbits-qrcode>
             <div v-else class='text-subtitle1'>
               No addresses available
             </div>
@@ -756,7 +765,6 @@ window.app.component('lnbits-node-info', {
       showDialog: false
     }
   },
-  mixins: [window.windowMixin],
   methods: {
     shortenNodeId(nodeId) {
       return nodeId

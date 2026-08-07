@@ -27,6 +27,14 @@ const DynamicComponent = {
             name: r.name,
             component: async () => {
               await LNbits.utils.loadTemplate(r.template)
+              if (r.i18n) {
+                const locale =
+                  window.i18n?.global?.locale?.value ??
+                  window.i18n?.global?.locale ??
+                  window.g.locale ??
+                  'en'
+                await LNbits.utils.loadExtI18n(r.i18n, locale)
+              }
               await LNbits.utils.loadScript(r.component)
               return window[r.name]
             }
@@ -107,6 +115,11 @@ const routes = [
     component: PageExtensionBuilder
   },
   {
+    path: '/extensions/builder/preview',
+    name: 'ExtensionsBuilderPreview',
+    component: PageExtensionBuilderPreview
+  },
+  {
     path: '/extensions',
     name: 'Extensions',
     component: PageExtensions
@@ -146,14 +159,37 @@ window.i18n = new VueI18n.createI18n({
   fallbackLocale: 'en',
   messages: window.localisation
 })
+;(function () {
+  let _applying = false
+  let _target = null
+  Vue.watch(
+    () => window.i18n.global.locale,
+    async (locale, prevLocale) => {
+      if (_applying || !LNbits.utils._extI18nDirs.size) return
+      _target = locale
+      _applying = true
+      window.i18n.global.locale = prevLocale
+      _applying = false
+      await Promise.all(
+        [...LNbits.utils._extI18nDirs].map(dir =>
+          LNbits.utils.loadExtI18n(dir, locale)
+        )
+      )
+      if (_target !== locale) return
+      _applying = true
+      window.i18n.global.locale = locale
+      _applying = false
+    },
+    {flush: 'sync'}
+  )
+})()
 
 window.app.mixin({
   data() {
     return {
       api: window._lnbitsApi,
       utils: window._lnbitsUtils,
-      g: window.g,
-      ...WINDOW_SETTINGS
+      g: window.g
     }
   },
   // backwards compatibility for extensions, should not be used in the future

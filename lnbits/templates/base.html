@@ -70,10 +70,10 @@
     </div>
     <script type="text/javascript">
       const RENDERED_ROUTE = '{{ normalize_path(request.path) }}'
-      const WINDOW_SETTINGS = {{ WINDOW_SETTINGS | tojson }}
-      Object.keys(WINDOW_SETTINGS).forEach(key => {
-        window[key] = WINDOW_SETTINGS[key]
-      })
+      const SETTINGS = {{ SETTINGS | tojson | safe }}
+      const CURRENCIES = {{ CURRENCIES | tojson | safe }}
+      // backwards compatibility for extensions (tpos)
+      const LNBITS_DENOMINATION = {{ LNBITS_DENOMINATION | tojson | safe }}
     </script>
     <!-- vue templates -->
     {% include('components.vue') %} {% include('pages.vue') %}
@@ -82,9 +82,8 @@
     <!-- scripts libraries -->
     {% for url in INCLUDED_JS %}
     <script src="{{ static_url_for('static', url) }}"></script>
-    {% endfor %}
+    {% endfor %} {% if user %}
     <!-- user init -->
-    {% if user %}
     <script>
       window.g.user = LNbits.map.user(JSON.parse({{ user | tojson | safe }}));
       {% if not public %}
@@ -92,6 +91,12 @@
       {% endif %}
     </script>
     {% endif %}
+    <!-- app init -->
+    <script>
+      window.app = Vue.createApp({
+        el: '#vue'
+      })
+    </script>
     <!-- scripts from extensions -->
     {% block scripts %}{% endblock %}
     <!-- components js -->

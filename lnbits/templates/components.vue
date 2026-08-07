@@ -1,4 +1,5 @@
-{% include('components/admin/funding.vue') %} {%
+{% include('components/admin/funding_seed_backup.vue') %} {%
+include('components/admin/funding.vue') %} {%
 include('components/admin/funding_sources.vue') %} {%
 include('components/admin/fiat_providers.vue') %} {%
 include('components/admin/exchange_providers.vue') %} {%
@@ -36,7 +37,7 @@ include('components/lnbits-error.vue') %}
   <q-list v-if="g.user" dense class="lnbits-drawer__q-list">
     <q-item-label header v-text="$t('manage')"></q-item-label>
     <div v-if="g.user.admin">
-      <q-item v-if="showAdmin" to="/admin">
+      <q-item v-if="g.settings.showAdmin" to="/admin">
         <q-item-section side>
           <q-icon
             name="settings"
@@ -51,7 +52,7 @@ include('components/lnbits-error.vue') %}
           <q-icon name="chevron_right" color="grey-5" size="md"></q-icon>
         </q-item-section>
       </q-item>
-      <q-item v-if="showNode" to="/node">
+      <q-item v-if="g.settings.showNodemanager" to="/node">
         <q-item-section side>
           <q-icon
             name="developer_board"
@@ -66,7 +67,7 @@ include('components/lnbits-error.vue') %}
           <q-icon name="chevron_right" color="grey-5" size="md"></q-icon>
         </q-item-section>
       </q-item>
-      <q-item v-if="showUsers" to="/users">
+      <q-item v-if="g.settings.showAdmin" to="/users">
         <q-item-section side>
           <q-icon
             name="groups"
@@ -81,7 +82,7 @@ include('components/lnbits-error.vue') %}
           <q-icon name="chevron_right" color="grey-5" size="md"></q-icon>
         </q-item-section>
       </q-item>
-      <q-item v-if="showAudit" to="/audit">
+      <q-item v-if="g.settings.showAudit" to="/audit">
         <q-item-section side>
           <q-icon
             name="playlist_add_check_circle"
@@ -112,7 +113,7 @@ include('components/lnbits-error.vue') %}
         <q-icon name="chevron_right" color="grey-5" size="md"></q-icon>
       </q-item-section>
     </q-item>
-    <q-item v-if="showExtensions" to="/extensions">
+    <q-item v-if="g.settings.showExtensions" to="/extensions">
       <q-item-section side>
         <q-icon
           name="extension"
@@ -561,11 +562,32 @@ include('components/lnbits-error.vue') %}
 </template>
 
 <template id="lnbits-extension-rating">
-  <div style="margin-bottom: 3px">
-    <q-rating v-model="rating" size="1.5em" :max="5" color="primary"
-      ><q-tooltip>
-        <span v-text="$t('extension_rating_soon')"></span> </q-tooltip
-    ></q-rating>
+  <div class="row items-center q-gutter-xs" style="margin-bottom: 3px">
+    <q-rating
+      :model-value="displayRating"
+      size="1.4em"
+      :max="5"
+      color="primary"
+      icon="star_border"
+      icon-selected="star"
+      icon-half="star_half"
+      readonly
+      :class="clickable ? 'cursor-pointer' : ''"
+      @click="handleClick"
+    >
+      <q-tooltip v-if="!hasData">
+        <span v-text="$t('extension_rating_soon')"></span>
+      </q-tooltip>
+      <q-tooltip v-else-if="clickable">
+        <span v-text="$t('reviews_open')"></span>
+      </q-tooltip>
+    </q-rating>
+    <div
+      class="text-caption text-grey"
+      v-if="count !== null && count !== undefined"
+    >
+      <span v-text="`(${count})`"></span>
+    </div>
   </div>
 </template>
 
@@ -665,7 +687,7 @@ include('components/lnbits-error.vue') %}
           dense
           filled
           v-model="walletName"
-          :label="$t('name_your_wallet', {name: SITE_TITLE + ' *'})"
+          :label="$t('name_your_wallet', {name: g.settings.siteTitle + ' *'})"
         ></q-input>
         <q-card-actions vertical align="center" class="q-pa-none">
           <q-btn
@@ -753,7 +775,13 @@ include('components/lnbits-error.vue') %}
           v-model="password"
           name="password"
           :label="$t('password') + ' *'"
-          type="password"
+          :type="showPwd ? 'text' : 'password'"
+          ><template v-slot:append>
+            <q-icon
+              :name="showPwd ? 'visibility' : 'visibility_off'"
+              class="cursor-pointer"
+              @click="showPwd = !showPwd"
+            /> </template
         ></q-input>
         <div class="row justify-end">
           <q-btn
@@ -782,27 +810,113 @@ include('components/lnbits-error.vue') %}
           filled
           v-model="password"
           :label="$t('password') + ' *'"
-          type="password"
+          :type="showPwd ? 'text' : 'password'"
           :rules="[val => !val || val.length >= 8 || $t('invalid_password')]"
+          ><template v-slot:append>
+            <q-icon
+              :name="showPwd ? 'visibility' : 'visibility_off'"
+              class="cursor-pointer"
+              @click="showPwd = !showPwd"
+            /> </template
         ></q-input>
         <q-input
           dense
           filled
           v-model="passwordRepeat"
           :label="$t('password_repeat') + ' *'"
-          type="password"
+          :type="showPwdRepeat ? 'text' : 'password'"
           :rules="[val => !val || val.length >= 8 || $t('invalid_password')]"
+          ><template v-slot:append>
+            <q-icon
+              :name="showPwdRepeat ? 'visibility' : 'visibility_off'"
+              class="cursor-pointer"
+              @click="showPwdRepeat = !showPwdRepeat"
+            /> </template
         ></q-input>
+        <div
+          v-if="confirmationMethodsCount > 1"
+          class="row justify-center q-mb-md"
+        >
+          <q-tabs
+            v-model="confirmationMethod"
+            dense
+            active-color="primary"
+            indicator-color="primary"
+          >
+            <q-tab
+              v-if="g.settings.userActivationByInvitationCode"
+              name="code"
+              icon="confirmation_number"
+              label="Code"
+            ></q-tab>
+            <q-tab
+              v-if="g.settings.userActivationByPayment"
+              name="payment"
+              icon="bolt"
+              label="Payment"
+            ></q-tab>
+            <q-tab
+              v-if="g.settings.userActivationByEmail"
+              name="email"
+              icon="email"
+              label="Email"
+            ></q-tab>
+          </q-tabs>
+        </div>
+        <div v-if="confirmationMethodsCount > 0" class="q-mb-md">
+          <q-tab-panels v-model="confirmationMethod">
+            <q-tab-panel name="code" class="q-pa-none">
+              <div
+                class="q-my-md q-pa-sm text-body2 text-grey-4 bg-grey-9 rounded-borders"
+              >
+                <q-icon name="info" color="orange-4" class="q-mr-xs"></q-icon>
+                You need an invitation code to register.
+              </div>
+              <div>
+                <q-input
+                  dense
+                  filled
+                  v-model="confirmationCode"
+                  :label="$t('invitation_code')"
+                  :type="showConfirmationCode ? 'text' : 'password'"
+                  :hint="$t('invitation_code_hint')"
+                >
+                  <q-btn
+                    @click="showConfirmationCode = !showConfirmationCode"
+                    dense
+                    flat
+                    :icon="
+                      showConfirmationCode ? 'visibility_off' : 'visibility'
+                    "
+                    color="grey"
+                  ></q-btn>
+                </q-input>
+              </div>
+            </q-tab-panel>
+            <q-tab-panel name="payment">
+              <div>payment</div>
+            </q-tab-panel>
+
+            <q-tab-panel name="email" class="q-pa-none">
+              <div>
+                <q-input
+                  dense
+                  filled
+                  v-model="confirmationEmail"
+                  :label="$t('email')"
+                  :hint="$t('email_confirmation_hint')"
+                >
+                </q-input>
+              </div>
+            </q-tab-panel>
+          </q-tab-panels>
+        </div>
+
         <div class="row justify-end">
           <q-btn
             unelevated
             color="primary"
-            :disable="
-              !password ||
-              !passwordRepeat ||
-              !username ||
-              password !== passwordRepeat
-            "
+            :disable="disableRegister"
             type="submit"
             class="full-width"
             :label="$t('create_account')"
@@ -830,16 +944,28 @@ include('components/lnbits-error.vue') %}
           filled
           v-model="password"
           :label="$t('password') + ' *'"
-          type="password"
+          :type="showPwd ? 'text' : 'password'"
           :rules="[val => !val || val.length >= 8 || $t('invalid_password')]"
+          ><template v-slot:append>
+            <q-icon
+              :name="showPwd ? 'visibility' : 'visibility_off'"
+              class="cursor-pointer"
+              @click="showPwd = !showPwd"
+            /> </template
         ></q-input>
         <q-input
           dense
           filled
           v-model="passwordRepeat"
           :label="$t('password_repeat') + ' *'"
-          type="password"
+          :type="showPwdRepeat ? 'text' : 'password'"
           :rules="[val => !val || val.length >= 8 || $t('invalid_password')]"
+          ><template v-slot:append>
+            <q-icon
+              :name="showPwdRepeat ? 'visibility' : 'visibility_off'"
+              class="cursor-pointer"
+              @click="showPwdRepeat = !showPwdRepeat"
+            /> </template
         ></q-input>
         <div class="row justify-end">
           <q-btn
@@ -939,9 +1065,9 @@ include('components/lnbits-error.vue') %}
         <q-avatar size="32px" class="q-mr-md">
           <q-img
             :src="
-              keycloakIcon
-                ? keycloakIcon
-                : 'lnbits/static/images/keycloak-logo.png'
+              g.settings.keycloakIcon
+                ? g.settings.keycloakIcon
+                : utils.url_for('lnbits/static/images/keycloak-logo.png')
             "
           ></q-img>
         </q-avatar>
@@ -949,7 +1075,35 @@ include('components/lnbits-error.vue') %}
           <span
             v-text="
               $t('signin_with_custom_org', {
-                custom_org: keycloakOrg
+                custom_org: g.settings.keycloakOrg || 'Keycloak'
+              })
+            "
+          ></span>
+        </div>
+      </q-btn>
+      <q-btn
+        v-if="authMethods.includes('oidc-auth')"
+        href="/api/v1/auth/oidc"
+        type="a"
+        outline
+        no-caps
+        color="grey"
+        class="btn-fixed-width"
+      >
+        <q-avatar size="32px" class="q-mr-md">
+          <q-img
+            :src="
+              g.settings.oidcIcon
+                ? g.settings.oidcIcon
+                : utils.url_for('lnbits/static/images/generic-oidc-logo.svg')
+            "
+          ></q-img>
+        </q-avatar>
+        <div>
+          <span
+            v-text="
+              $t('signin_with_custom_org', {
+                custom_org: g.settings.oidcOrg || 'OIDC'
               })
             "
           ></span>

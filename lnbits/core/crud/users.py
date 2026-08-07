@@ -4,10 +4,17 @@ from typing import Any
 from uuid import uuid4
 
 from lnbits.core.crud.extensions import get_user_active_extensions_ids
-from lnbits.core.crud.wallets import create_wallet, get_wallets
+from lnbits.core.crud.wallets import (
+    clear_wallet_cache,
+    create_wallet,
+    get_standalone_wallet,
+    get_wallets,
+)
 from lnbits.core.db import db
 from lnbits.core.models import UserAcls
 from lnbits.db import Connection, Filters, Page
+from lnbits.helpers import sha256s
+from lnbits.utils.cache import cache
 
 from ..models import (
     Account,
@@ -30,6 +37,13 @@ async def create_account(
     return account
 
 
+async def get_accounts_count(conn: Connection | None = None) -> int:
+    row: dict | None = await (conn or db).fetchone(
+        "SELECT COUNT(*) as count FROM accounts"
+    )
+    return int(row["count"]) if row else 0
+
+
 async def update_account(account: Account, conn: Connection | None = None) -> Account:
     account.updated_at = datetime.now(timezone.utc)
     await (conn or db).update("accounts", account)
@@ -41,6 +55,7 @@ async def delete_account(user_id: str, conn: Connection | None = None) -> None:
         "DELETE from accounts WHERE id = :user",
         {"user": user_id},
     )
+    await clear_user_id_cache(user_id)
 
 
 async def get_accounts(
@@ -49,17 +64,22 @@ async def get_accounts(
 ) -> Page[AccountOverview]:
     where_clauses = []
     values: dict[str, Any] = {}
+    filters = filters or Filters()
 
-    # Make wallet filter explicit
-    wallet_filter = (
-        next((f for f in filters.filters if f.field == "wallet_id"), None)
-        if filters
-        else None
-    )
-    if filters and wallet_filter and wallet_filter.values:
-        where_clauses.append("wallets.id = :wallet_id")
-        values = {**values, "wallet_id": next(iter(wallet_filter.values.values()))}
-        filters.filters = [f for f in filters.filters if f.field != "wallet_id"]
+    wallet_filter = filters.get_filter_by_field("wallet_id")
+
+    if wallet_filter and wallet_filter.values:
+        wallet_id_value = next(iter(wallet_filter.values.values()), None)
+        wallet = (
+            await get_standalone_wallet(wallet_id_value, deleted=None, conn=conn)
+            if wallet_id_value
+            else None
+        )
+        if not wallet:
+            return Page(data=[], total=0)
+        where_clauses.append("accounts.id = :account_id")
+        values = {**values, "account_id": wallet.user}
+        filters.remove_filter_by_field("wallet_id")
 
     return await (conn or db).fetch_page(
         """
@@ -69,6 +89,7 @@ async def get_accounts(
             accounts.email,
             accounts.pubkey,
             accounts.external_id,
+            accounts.activated,
             SUM(COALESCE((
                 SELECT balance FROM balances WHERE wallet_id = wallets.id
             ), 0)) as balance_msat,
@@ -93,12 +114,18 @@ async def get_accounts(
     )
 
 
-async def get_account(user_id: str, conn: Connection | None = None) -> Account | None:
+async def get_account(
+    user_id: str, active_only: bool = True, conn: Connection | None = None
+) -> Account | None:
     if len(user_id) == 0:
         return None
+
     return await (conn or db).fetchone(
-        "SELECT * FROM accounts WHERE id = :id",
-        {"id": user_id},
+        """
+            SELECT * FROM accounts
+            WHERE id = :id AND (activated = true OR activated = :activated)
+        """,
+        {"id": user_id, "activated": active_only},
         Account,
     )
 
@@ -124,55 +151,79 @@ async def delete_accounts_no_wallets(
 
 
 async def get_account_by_username(
-    username: str, conn: Connection | None = None
+    username: str, active_only: bool = True, conn: Connection | None = None
 ) -> Account | None:
     if len(username) == 0:
         return None
+
     return await (conn or db).fetchone(
-        "SELECT * FROM accounts WHERE LOWER(username) = :username",
-        {"username": username.lower()},
+        """
+            SELECT * FROM accounts
+            WHERE
+                LOWER(username) = :username
+                AND (activated = true OR activated = :activated)
+        """,
+        {"username": username.lower(), "activated": active_only},
         Account,
     )
 
 
 async def get_account_by_pubkey(
-    pubkey: str, conn: Connection | None = None
+    pubkey: str, active_only: bool = True, conn: Connection | None = None
 ) -> Account | None:
     return await (conn or db).fetchone(
-        "SELECT * FROM accounts WHERE LOWER(pubkey) = :pubkey",
-        {"pubkey": pubkey.lower()},
+        """
+            SELECT * FROM accounts
+            WHERE
+                LOWER(pubkey) = :pubkey
+                AND (activated = true OR activated = :activated)
+        """,
+        {"pubkey": pubkey.lower(), "activated": active_only},
         Account,
     )
 
 
 async def get_account_by_email(
-    email: str, conn: Connection | None = None
+    email: str, active_only: bool = True, conn: Connection | None = None
 ) -> Account | None:
     if len(email) == 0:
         return None
+
     return await (conn or db).fetchone(
-        "SELECT * FROM accounts WHERE LOWER(email) = :email",
-        {"email": email.lower()},
+        """
+            SELECT * FROM accounts
+            WHERE
+                LOWER(email) = :email
+                AND (activated = true OR activated = :activated)
+        """,
+        {"email": email.lower(), "activated": active_only},
         Account,
     )
 
 
 async def get_account_by_username_or_email(
-    username_or_email: str, conn: Connection | None = None
+    username_or_email: str,
+    active_only: bool = True,
+    conn: Connection | None = None,
 ) -> Account | None:
+
     return await (conn or db).fetchone(
         """
             SELECT * FROM accounts
-            WHERE LOWER(email) = :value or LOWER(username) = :value
+            WHERE
+                (LOWER(email) = :value or LOWER(username) = :value)
+                AND (activated = true OR activated = :activated)
         """,
-        {"value": username_or_email.lower()},
+        {"value": username_or_email.lower(), "activated": active_only},
         Account,
     )
 
 
-async def get_user(user_id: str, conn: Connection | None = None) -> User | None:
+async def get_user(
+    user_id: str, active_only: bool = True, conn: Connection | None = None
+) -> User | None:
     async with db.reuse_conn(conn) if conn else db.connect() as conn:
-        account = await get_account(user_id, conn=conn)
+        account = await get_account(user_id, active_only, conn=conn)
         if not account:
             return None
         return await get_user_from_account(account, conn=conn)
@@ -191,6 +242,7 @@ async def get_user_from_account(
 
     return User(
         id=account.id,
+        activated=account.activated,
         email=account.email,
         username=account.username,
         pubkey=account.pubkey,
@@ -204,6 +256,7 @@ async def get_user_from_account(
         super_user=account.is_super_user,
         fiat_providers=account.fiat_providers,
         has_password=account.password_hash is not None,
+        ui_customization=account.ui_customization or {},
     )
 
 
@@ -215,12 +268,31 @@ async def update_user_access_control_list(
 
 
 async def get_user_access_control_lists(
-    user_id: str, conn: Connection | None = None
+    user_id: str, active_only: bool = True, conn: Connection | None = None
 ) -> UserAcls:
     user_acls = await (conn or db).fetchone(
-        "SELECT id, access_control_list FROM accounts WHERE id = :id",
-        {"id": user_id},
+        """
+            SELECT id, access_control_list FROM accounts
+            WHERE id = :user_id AND (activated = true OR activated = :activated)
+        """,
+        {"user_id": user_id, "activated": active_only},
         UserAcls,
     )
 
     return user_acls or UserAcls(id=user_id)
+
+
+async def clear_user_id_cache(user_id: str):
+    user = await get_user(user_id, active_only=True)
+    if user:
+        clear_user_cache(user)
+
+
+def clear_user_cache(user: User):
+    user_cache_key: str | None = cache.pop(
+        f"auth:user:cache_key:{sha256s(user.id)}", None
+    )
+    if user_cache_key:
+        cache.pop(user_cache_key)
+    for wallet in user.wallets:
+        clear_wallet_cache(wallet)

@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from lnbits.helpers import (
     download_url,
@@ -55,9 +55,10 @@ class GitHubRelease(BaseModel):
 
 
 class Manifest(BaseModel):
-    featured: list[str] = []
     extensions: list[ExplicitRelease] = []
     repos: list[GitHubRelease] = []
+    featured: list[str] = []
+    categories: dict[str, list[str]] = {}
 
 
 class GitHubRepoRelease(BaseModel):
@@ -269,10 +270,30 @@ class ExtensionRelease(BaseModel):
     async def get_github_releases(cls, org: str, repo: str) -> list[ExtensionRelease]:
         try:
             github_releases = await cls.fetch_github_releases(org, repo)
-            return [
+            extension_releases = [
                 ExtensionRelease.from_github_release(f"{org}/{repo}", r)
                 for r in github_releases
             ]
+            for release in extension_releases:
+                if not release.details_link:
+                    continue
+                try:
+                    config = await ExtensionConfig.fetch_github_release_config(
+                        org, repo, release.version
+                    )
+                except Exception as e:
+                    logger.warning(e)
+                    config = None
+                if not config:
+                    continue
+
+                release.min_lnbits_version = config.min_lnbits_version
+                release.max_lnbits_version = config.max_lnbits_version
+                release.is_version_compatible = config.is_version_compatible()
+
+                release.icon = icon_to_github_url(f"{org}/{repo}", config.tile)
+
+            return extension_releases
         except Exception as e:
             logger.warning(e)
             return []
@@ -288,7 +309,6 @@ class ExtensionRelease(BaseModel):
 
     @classmethod
     async def fetch_release_details(cls, details_link: str) -> dict | None:
-
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(details_link)
@@ -313,6 +333,7 @@ class ExtensionMeta(BaseModel):
     dependencies: list[str] = []
     archive: str | None = None
     featured: bool = False
+    categories: list[str] = []
     paid_features: str | None = None
     has_paid_release: bool = False
     has_free_release: bool = False
@@ -660,6 +681,11 @@ class InstallableExtension(BaseModel):
 
                     meta = ext.meta or ExtensionMeta()
                     meta.featured = ext.id in manifest.featured
+                    meta.categories = [
+                        category
+                        for category, ext_ids in manifest.categories.items()
+                        if ext.id in ext_ids
+                    ]
                     ext.meta = meta
                     extension_list += [ext]
 
@@ -675,6 +701,11 @@ class InstallableExtension(BaseModel):
                     ext.check_release_updates(release)
                     meta = ext.meta or ExtensionMeta()
                     meta.featured = ext.id in manifest.featured
+                    meta.categories = [
+                        category
+                        for category, ext_ids in manifest.categories.items()
+                        if ext.id in ext_ids
+                    ]
                     ext.meta = meta
                     extension_list += [ext]
             except Exception as e:
@@ -775,6 +806,32 @@ class ExtensionDetailsRequest(BaseModel):
     ext_id: str
     source_repo: str
     version: str
+
+
+class ExtensionReviewsStatus(BaseModel):
+    tag: str
+    avg_rating: float
+    review_count: int
+
+
+class CreateExtensionReview(BaseModel):
+    tag: str
+    name: str | None = Field(None)
+    rating: int = Field(..., ge=0, le=1000)
+    comment: str | None = Field(None)
+
+
+class ExtensionReviewPaymentRequest(BaseModel):
+    payment_hash: str
+    payment_request: str
+
+
+class ExtensionReview(BaseModel):
+    id: str
+    name: str | None = Field(default=None)
+    tag: str | None = Field(default=None)
+    rating: int = Field(default=0, ge=0, le=1000)
+    comment: str | None = Field(default=None)
 
 
 async def github_api_get(url: str, error_msg: str | None) -> Any:

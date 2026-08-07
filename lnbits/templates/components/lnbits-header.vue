@@ -1,6 +1,10 @@
 <template id="lnbits-header">
   <q-header bordered class="bg-marginal-bg">
-    <q-banner v-if="showVoidwallet" class="bg-warning text-white" dense>
+    <q-banner
+      v-if="g.settings.showVoidwallet"
+      class="bg-warning text-white"
+      dense
+    >
       <template v-slot:avatar>
         <q-icon name="warning" color="white" />
       </template>
@@ -23,14 +27,13 @@
       ></q-btn>
       <q-toolbar-title>
         <q-btn flat no-caps dense class="q-mr-sm" size="lg" type="a" href="/">
-          <q-img
-            v-if="customLogoUrl"
-            height="30px"
-            alt="Logo"
-            :src="customLogoUrl"
-          ></q-img>
-          <span v-else-if="!titleIsLnbits"><strong>LN</strong>bits</span>
-          <span v-else v-text="title"></span>
+          <q-avatar v-if="g.settings.customLogo" height="30px">
+            <img alt="Logo" :src="g.settings.customLogo" />
+          </q-avatar>
+          <span v-else-if="g.settings.siteTitle == 'LNbits'"
+            ><strong>LN</strong>bits</span
+          >
+          <span v-else v-text="g.settings.siteTitle"></span>
         </q-btn>
         <q-badge v-if="g.user && g.user.super_user">Super User</q-badge>
         <q-badge v-else-if="g.user && g.user.admin">Admin User</q-badge>
@@ -38,31 +41,31 @@
       <q-badge
         class="q-mr-md"
         v-show="$q.screen.gt.sm"
-        v-if="hasCustomBadge"
-        :label="customBadge"
-        :color="customBadgeColor"
+        v-if="g.settings.customBadge"
+        :label="g.settings.customBadge"
+        :color="g.settings.customBadgeColor"
       >
       </q-badge>
 
       <q-badge
         v-show="$q.screen.gt.sm"
-        v-if="hasServiceFee"
+        v-if="g.user && g.settings.serviceFee > 0"
         color="green"
         class="q-mr-md"
       >
         <span
-          v-if="hasServiceFeeMax"
+          v-if="g.user && g.settings.serviceFeeMax > 0"
           v-text="
             $t('service_fee_max_badge', {
-              amount: serviceFee,
-              max: serviceFeeMax,
+              amount: g.settings.serviceFee,
+              max: g.settings.serviceFeeMax,
               denom: g.denomination
             })
           "
         ></span>
         <span
           v-else
-          v-text="$t('service_fee_badge', {amount: serviceFee})"
+          v-text="$t('service_fee_badge', {amount: g.settings.serviceFee})"
         ></span>
         <q-tooltip><span v-text="$t('service_fee_tooltip')"></span></q-tooltip>
       </q-badge>
@@ -71,9 +74,11 @@
         <span>OFFLINE</span>
       </q-badge>
 
-      <lnbits-language-dropdown></lnbits-language-dropdown>
+      <lnbits-language-dropdown
+        @language-changed="handleLanguageChanged({locale: $event})"
+      ></lnbits-language-dropdown>
 
-      <q-btn-dropdown v-if="g.user" flat rounded size="sm" class="q-pl-sm">
+      <q-btn-dropdown v-if="g.user" flat rounded size="md" class="q-pl-sm">
         <template v-slot:label>
           <q-avatar
             v-if="g.user?.extra?.picture && g.user?.extra?.picture !== ''"
@@ -136,6 +141,20 @@
           </q-item>
         </q-list>
       </q-btn-dropdown>
+      <q-btn
+        v-if="g.isUserImpersonated"
+        @click="stopImpersonation"
+        rounded
+        size="sm"
+        class="q-pl-sm"
+        color="negative"
+        icon="face_retouching_off"
+        label="Stop"
+      >
+        <q-tooltip
+          ><span v-text="$t('stop_user_impersonation')"></span
+        ></q-tooltip>
+      </q-btn>
     </q-toolbar>
   </q-header>
 </template>

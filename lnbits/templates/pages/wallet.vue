@@ -171,6 +171,19 @@
                   ><span v-text="$t('camera_tooltip')"></span
                 ></q-tooltip>
               </q-btn>
+              <div
+                v-if="g.settings.walletFeaturedButtonUrl"
+                class="float-right q-mt-sm q-ml-sm"
+              >
+                <q-btn
+                  color="primary"
+                  :label="g.settings.walletFeaturedButtonLabel"
+                  :icon="g.settings.walletFeaturedButtonIcon || undefined"
+                  size="sm"
+                  :to="g.settings.walletFeaturedButtonUrl"
+                >
+                </q-btn>
+              </div>
               <lnbits-update-balance
                 v-if="$q.screen.gt.md"
                 :wallet_id="this.g.wallet.id"
@@ -191,7 +204,7 @@
       </q-card>
     </div>
     <div
-      v-if="!g.mobileSimple || !$q.screen.lt.md"
+      v-show="!g.mobileSimple || !$q.screen.lt.md"
       class="col-12 col-md-5 q-gutter-y-md"
     >
       <lnbits-wallet-extra
@@ -199,10 +212,10 @@
         @send-lnurl="handleSendLnurl"
         :chart-config="chartConfig"
       ></lnbits-wallet-extra>
-      <q-card class="lnbits-wallet-ads" v-if="AD_SPACE_ENABLED">
+      <q-card class="lnbits-wallet-ads" v-if="g.settings.showAdSpace">
         <q-card-section class="text-subtitle1">
-          <span v-text="AD_SPACE_TITLE"></span>
-          <a :href="ad[0]" class="lnbits-ad" v-for="ad in g.ads">
+          <span v-text="g.settings.adSpaceTitle"></span>
+          <a :href="ad[0]" class="lnbits-ad" v-for="ad in g.settings.adSpace">
             <q-img class="q-mb-xs" v-if="$q.dark.isActive" :src="ad[1]"></q-img>
             <q-img class="q-mb-xs" v-else :src="ad[2]"></q-img>
           </a>
@@ -276,7 +289,7 @@
           ></q-input>
         </div>
         <q-input
-          v-if="has_holdinvoice"
+          v-if="g.settings.hasHoldinvoice"
           filled
           dense
           v-model="receive.data.payment_hash"
@@ -381,6 +394,44 @@
                 <span v-text="$t('pay_with', {provider: 'PayPal'})"></span>
               </q-item-section>
             </q-item>
+            <q-separator
+              v-if="g.user.fiat_providers?.includes('square')"
+            ></q-separator>
+            <q-item
+              v-if="g.user.fiat_providers?.includes('square')"
+              :active="receive.fiatProvider === 'square'"
+              @click="receive.fiatProvider = 'square'"
+              active-class="bg-teal-1 text-grey-8 text-weight-bold"
+              clickable
+              v-ripple
+            >
+              <q-item-section avatar>
+                <q-avatar>
+                  <q-img src="/static/images/square_logo.png"></q-img>
+                </q-avatar>
+              </q-item-section>
+              <q-item-section>
+                <span v-text="$t('pay_with', {provider: 'Square'})"></span>
+              </q-item-section>
+            </q-item>
+            <q-separator
+              v-if="g.user.fiat_providers?.includes('revolut')"
+            ></q-separator>
+            <q-item
+              v-if="g.user.fiat_providers?.includes('revolut')"
+              :active="receive.fiatProvider === 'revolut'"
+              @click="receive.fiatProvider = 'revolut'"
+              active-class="bg-teal-1 text-grey-8 text-weight-bold"
+              clickable
+              v-ripple
+            >
+              <q-item-section avatar>
+                <q-avatar color="deep-orange-7" text-color="white">R</q-avatar>
+              </q-item-section>
+              <q-item-section>
+                <span v-text="$t('pay_with', {provider: 'Revolut'})"></span>
+              </q-item-section>
+            </q-item>
           </q-list>
         </div>
 
@@ -425,7 +476,7 @@
       <lnbits-qrcode
         v-else
         :href="'lightning:' + receive.paymentReq"
-        :value="'lightning:' + receive.paymentReq"
+        :value="'LIGHTNING:' + receive.paymentReq.toUpperCase()"
       >
       </lnbits-qrcode>
       <div class="text-center">

@@ -50,7 +50,7 @@
           <br />
         </div>
         <div class="col">
-          <div v-if="LNBITS_NODE_UI">
+          <div v-if="g.settings.hasNodemanager">
             <p>
               <span v-text="$t('node_management')"></span>
             </p>
@@ -70,67 +70,9 @@
               v-model="formData.lnbits_node_ui_transactions"
             ></q-toggle>
           </div>
-          <p v-if="!LNBITS_NODE_UI">
+          <p v-if="!g.settings.hasNodemanager">
             <span v-text="$t('node_management_not_supported')"></span>
           </p>
-        </div>
-      </div>
-      <div class="row q-col-gutter-md">
-        <div class="col-12 col-md-3">
-          <p><span v-text="$t('fee_reserve')"></span></p>
-
-          <q-input
-            type="number"
-            filled
-            v-model="formData.lnbits_reserve_fee_min"
-            :label="$t('fee_reserve_msats')"
-          >
-          </q-input>
-        </div>
-        <div class="col-12 col-md-3">
-          <p>
-            <span v-text="$t('fee_reserve_percent')"></span>
-          </p>
-          <q-input
-            type="number"
-            filled
-            name="lnbits_reserve_fee_percent"
-            v-model="formData.lnbits_reserve_fee_percent"
-            :label="$t('reserve_fee_in_percent')"
-            step="0.1"
-          ></q-input>
-        </div>
-        <div class="col-12 col-md-3">
-          <p><span v-text="$t('invoice_expiry')"></span></p>
-          <q-input
-            filled
-            v-model.number="formData.lightning_invoice_expiry"
-            type="number"
-            :label="$t('invoice_expiry_label')"
-            mask="#######"
-          >
-          </q-input>
-        </div>
-        <div class="col-12 col-md-3">
-          <p>
-            <span v-text="$t('payment_wait_time')"></span>
-            <sup>
-              <q-icon name="info" size="16px" class="q-ml-xs"></q-icon>
-              <q-tooltip max-width="150px">
-                <span v-text="$t('payment_wait_time_tooltip')"></span>
-              </q-tooltip>
-            </sup>
-          </p>
-          <q-input
-            type="number"
-            filled
-            name="lnbits_funding_source_pay_invoice_wait_seconds"
-            v-model="formData.lnbits_funding_source_pay_invoice_wait_seconds"
-            :label="$t('payment_wait_time')"
-            :hint="$t('payment_wait_time_desc')"
-            step="1"
-            min="0"
-          ></q-input>
         </div>
       </div>
       <div v-if="isSuperUser">
@@ -161,10 +103,122 @@
           </div>
         </div>
       </div>
+      <div class="row q-col-gutter-md q-mt-lg">
+        <div class="col-12">
+          <h6 class="q-my-none">
+            <span v-text="$t('routing_fee_reserve_calculations')"></span>
+          </h6>
+          <p class="q-mt-sm q-mb-none">
+            <span v-html="$t('routing_fee_reserve_calculations_desc')"></span>
+          </p>
+        </div>
+        <div class="col-12 col-md-4">
+          <p>
+            <span v-text="$t('fee_reserve')"></span>
+            <sup>
+              <q-icon name="info" size="16px" class="q-ml-xs"></q-icon>
+              <q-tooltip max-width="300px">
+                <span v-html="$t('fee_reserve_min_hint')"></span>
+              </q-tooltip>
+            </sup>
+          </p>
+          <q-input
+            type="number"
+            filled
+            v-model="formData.lnbits_reserve_fee_min"
+            :suffix="$t('millisats')"
+          >
+          </q-input>
+        </div>
+        <div class="col-12 col-md-4">
+          <p>
+            <span v-text="$t('fee_reserve_percent')"></span>
+            <sup>
+              <q-icon name="info" size="16px" class="q-ml-xs"></q-icon>
+              <q-tooltip max-width="300px">
+                <span v-html="$t('fee_reserve_percent_hint')"></span>
+              </q-tooltip>
+            </sup>
+          </p>
+          <q-input
+            type="number"
+            filled
+            name="lnbits_reserve_fee_percent"
+            v-model="formData.lnbits_reserve_fee_percent"
+            step="0.1"
+            suffix="%"
+          ></q-input>
+        </div>
+      </div>
+      <div class="row q-col-gutter-md q-mt-sm">
+        <div class="col-12">
+          <h6 class="q-my-none">
+            <span v-text="$t('payment_timeouts')"></span>
+          </h6>
+        </div>
+        <div class="col-12 col-md-4">
+          <p><span v-text="$t('invoice_expiry')"></span></p>
+          <q-input
+            filled
+            v-model.number="formData.lightning_invoice_expiry"
+            type="number"
+            :suffix="$t('seconds')"
+            mask="#######"
+          >
+          </q-input>
+        </div>
+        <div class="col-12 col-md-4">
+          <p>
+            <span v-text="$t('payment_wait_time')"></span>
+            <sup>
+              <q-icon name="info" size="16px" class="q-ml-xs"></q-icon>
+              <q-tooltip max-width="300px">
+                <span v-text="$t('payment_wait_time_tooltip')"></span>
+              </q-tooltip>
+            </sup>
+          </p>
+          <q-input
+            type="number"
+            filled
+            name="lnbits_funding_source_pay_invoice_wait_seconds"
+            v-model="formData.lnbits_funding_source_pay_invoice_wait_seconds"
+            :hint="$t('payment_wait_time_desc')"
+            :suffix="$t('seconds')"
+            step="1"
+            min="0"
+          ></q-input>
+        </div>
+        <div class="col-12 col-md-4">
+          <p>
+            <span v-text="$t('payment_pending_interval')"></span>
+            <sup>
+              <q-icon name="info" size="16px" class="q-ml-xs"></q-icon>
+              <q-tooltip max-width="150px">
+                <span v-text="$t('payment_pending_interval_tooltip')"></span>
+              </q-tooltip>
+            </sup>
+          </p>
+          <q-input
+            type="number"
+            filled
+            name="lnbits_funding_source_pending_interval_seconds"
+            v-model="formData.lnbits_funding_source_pending_interval_seconds"
+            :label="$t('payment_pending_interval')"
+            :hint="$t('payment_pending_interval_desc')"
+            step="1"
+            min="0"
+          ></q-input>
+        </div>
+      </div>
       <q-separator></q-separator>
       <h6 class="q-mt-lg q-mb-sm">
         <p v-text="$t('watchdog')"></p>
       </h6>
+      <div class="row q-col-gutter-md">
+        <div class="col-12">
+          <p v-text="$t('watchdog_introduction')"></p>
+        </div>
+      </div>
       <div class="row q-col-gutter-md">
         <div class="col-12 col-md-6">
           <q-item tag="label" v-ripple>
@@ -239,6 +293,7 @@
               <q-input
                 filled
                 v-model="formData.lnbits_watchdog_delta"
+                :suffix="$t('sats')"
                 type="number"
               />
             </q-item-section>
@@ -246,5 +301,11 @@
         </div>
       </div>
     </div>
+    <lnbits-admin-funding-seed-backup
+      :active="active"
+      :is-super-user="isSuperUser"
+      :form-data="formData"
+      :settings="settings"
+    ></lnbits-admin-funding-seed-backup>
   </q-card-section>
 </template>

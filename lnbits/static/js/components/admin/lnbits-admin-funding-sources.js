@@ -1,6 +1,5 @@
 window.app.component('lnbits-admin-funding-sources', {
   template: '#lnbits-admin-funding-sources',
-  mixins: [window.windowMixin],
   props: ['form-data', 'allowed-funding-sources'],
   methods: {
     getFundingSourceLabel(item) {
@@ -203,7 +202,18 @@ window.app.component('lnbits-admin-funding-sources', {
           'Phoenixd',
           {
             phoenixd_api_endpoint: 'Endpoint',
-            phoenixd_api_password: 'Key'
+            phoenixd_api_password: 'Key',
+            phoenixd_data_dir: {
+              label: 'Data Directory',
+              hint: 'Directory where phoenixd stores its data, including the seed phrase.'
+            },
+            phoenixd_mnemonic: {
+              label: 'Phoenixd Seed Phrase',
+              hint: 'Only available if phoenixd data-dir is specified',
+              readonly: true,
+              copy: true,
+              qrcode: true
+            }
           }
         ],
         [
@@ -227,6 +237,48 @@ window.app.component('lnbits-admin-funding-sources', {
           {
             spark_url: 'Endpoint',
             spark_token: 'Token'
+          }
+        ],
+        [
+          'SparkL2Wallet',
+          'Spark (L2)',
+          {
+            spark_l2_external_endpoint: {
+              label: 'External Sidecar Endpoint',
+              hint: 'Make sure to also specify the API key if your sidecar requires authentication.',
+              value: ''
+            },
+            spark_l2_mnemonic: {
+              label: 'External Sidecar Mnemonic',
+              hint: 'Mnemonic for the Spark wallet on the external sidecar. Required if the side car does not have its own mnemonic.',
+              value: ''
+            },
+            spark_l2_external_api_key: {
+              label: 'External Sidecar API Key',
+              hint: 'API key for authenticating with the external sidecar if it requires authentication.',
+              value: ''
+            },
+            spark_l2_network: {
+              label: 'Network',
+              value: 'MAINNET',
+              hint: 'The network to use for the Spark wallet.',
+              advanced: true
+            },
+            spark_l2_pay_wait_ms: {
+              label: 'Payment Wait Time (ms)',
+              hint: 'The time to wait for a payment to be processed before considering it failed.',
+              advanced: true
+            },
+            spark_l2_pay_poll_ms: {
+              label: 'Payment Poll Time (ms)',
+              hint: 'The time to wait between polling for payment status updates.',
+              advanced: true
+            },
+            spark_l2_stream_keepalive_ms: {
+              label: 'Stream Keepalive Time (ms)',
+              hint: 'The time to wait between sending keepalive messages to the Spark sidecar to keep the connection open.',
+              advanced: true
+            }
           }
         ],
         [

@@ -14,7 +14,6 @@ nav_order: 3
 ![phase: stable](https://img.shields.io/badge/phase-stable-2EA043)
 ![PRs: welcome](https://img.shields.io/badge/PRs-Welcome-yellow)
 [<img src="https://img.shields.io/badge/community_chat-Telegram-24A1DE">](https://t.me/lnbits)
-[<img src="https://img.shields.io/badge/supported_by-%3E__OpenSats-f97316">](https://opensats.org)
 
 # Backend wallets
 
@@ -41,7 +40,8 @@ A backend wallet is selected and configured entirely through LNbits environment 
 | [CoreLightning](#corelightning)                 | [LND (gRPC)](#lnd-grpc)               | [Blink](#blink)                                   |
 | [CoreLightning REST](#corelightning-rest)       | [LNbits](#lnbits)                     | [Alby](#alby)                                     |
 | [Spark (Core Lightning)](#spark-core-lightning) | [LNPay](#lnpay)                       | [Boltz](#boltz)                                   |
-| [Cliche Wallet](#cliche-wallet)                 | [ZBD](#zbd)                           | [Phoenixd](#phoenixd)                             |
+| [Spark L2](#spark-l2)                           | [ZBD](#zbd)                           | [Phoenixd](#phoenixd)                             |
+| [Cliche Wallet](#cliche-wallet)                 |                                       |                                                   |
 | [Breez SDK](#breez-sdk)                         | [Breez Liquid SDK](#breez-liquid-sdk) | [Nostr Wallet Connect](#nostr-wallet-connect-nwc) |
 | [Strike](#strike)                               | [Eclair (ACINQ)](#eclair-acinq)       | [LN.tips](#lntips)                                |
 | [Fake Wallet](#fake-wallet)                     |                                       |                                                   |
@@ -52,7 +52,7 @@ A backend wallet is selected and configured entirely through LNbits environment 
 
 ### CLNRest (using [runes](https://docs.corelightning.org/reference/lightning-createrune))
 
-[Core Lightning REST API docs](https://docs.corelightning.org/docs/rest)  
+[Core Lightning REST API docs](https://docs.corelightning.org/docs/rest)
 Should also work with the [Rust version of CLNRest](https://github.com/daywalker90/clnrest-rs)
 
 **Environment variables**
@@ -126,6 +126,33 @@ Old REST interface using [RTL c-lightning-REST](https://github.com/Ride-The-Ligh
 - `LNBITS_BACKEND_WALLET_CLASS`: `SparkWallet`
 - `SPARK_URL`: `http://10.147.17.230:9737/rpc`
 - `SPARK_TOKEN`: `secret_access_key`
+
+## Spark L2
+
+Self-custodial funding source using the [Spark L2](https://docs.spark.money/start/overview) network. Requires a Node.js [sidecar](https://github.com/lnbits/spark_sidecar) that bridges lnbits talking to Spark. Works in addition with any Spark-compatible seed (Wallet of Satoshi, BuhoGO, BlitzWallet).
+If the sidecar is started with a `mnemonic` then that mnemonic will be used. Otherwhise if a mnemonic is set for the `Spark L2` LNbits funding source then that mnemonic will be used.
+
+### Optional tuning
+
+- `SPARK_L2_PAY_WAIT_MS`: `4000` _(payment timeout in ms)_
+- `SPARK_L2_PAY_POLL_MS`: `500` _(polling interval in ms)_
+- `SPARK_L2_STREAM_KEEPALIVE_MS`: `15000` _(SSE keepalive in ms)_
+
+### Example: run the sidecar
+
+```bash
+git clone https://github.com/lnbits/spark_sidecar.git
+cd spark_sidecar
+npm install
+
+SPARK_MNEMONIC="bottom bottom bottom bottom bottom bottom bottom bottom bottom bottom bottom bottom" \
+SPARK_NETWORK=MAINNET \
+SPARK_SIDECAR_PORT=8765 \
+SPARK_PAY_WAIT_MS=20000 \
+node server.mjs
+```
+
+For testing, you can generate a 12-word mnemonic at https://iancoleman.io/bip39/. Store it securely — it controls your funds. Then select Spark (L2) as the funding source in LNbits.
 
 ## LND (REST)
 

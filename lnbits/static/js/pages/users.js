@@ -1,6 +1,5 @@
 window.PageUsers = {
   template: '#page-users',
-  mixins: [window.windowMixin],
   data() {
     return {
       paymentsWallet: {},
@@ -71,10 +70,10 @@ window.PageUsers = {
       usersTable: {
         columns: [
           {
-            name: 'admin',
+            name: 'activated',
             align: 'left',
-            label: 'Admin',
-            field: 'admin',
+            label: this.$t('activated'),
+            field: 'activated',
             sortable: false
           },
           {
@@ -402,12 +401,25 @@ window.PageUsers = {
 
     toggleAdmin(userId) {
       LNbits.api
-        .request('GET', `/users/api/v1/user/${userId}/admin`)
+        .request('PUT', `/users/api/v1/user/${userId}/admin`)
         .then(() => {
           this.fetchUsers()
           Quasar.Notify.create({
             type: 'positive',
             message: 'Toggled admin!',
+            icon: null
+          })
+        })
+        .catch(LNbits.utils.notifyApiError)
+    },
+    toggleUserActivated(userId) {
+      LNbits.api
+        .request('PUT', `/users/api/v1/user/${userId}/activate`)
+        .then(res => {
+          this.fetchUsers()
+          Quasar.Notify.create({
+            type: 'positive',
+            message: res.data.message,
             icon: null
           })
         })
@@ -437,6 +449,20 @@ window.PageUsers = {
           message: 'Failed to get user!'
         })
         this.activeUser.show = false
+      }
+    },
+    async impersonateUser(user_id) {
+      try {
+        await LNbits.api.impersonateUser(user_id)
+        LNbits.utils.backupLocalStorage('impersonation', true)
+        this.$q.localStorage.setItem('lnbits.disclaimerShown', true)
+        window.location = '/wallet'
+      } catch (error) {
+        console.warn(error)
+        Quasar.Notify.create({
+          type: 'warning',
+          message: 'Failed to impersonate user!'
+        })
       }
     },
     async showWalletPayments(walletId) {

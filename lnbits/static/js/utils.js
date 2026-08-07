@@ -1,7 +1,7 @@
 window._lnbitsUtils = {
   url_for(url) {
     const _url = new URL(url, window.location.origin)
-    _url.searchParams.set('v', WINDOW_SETTINGS.CACHE_KEY)
+    _url.searchParams.set('v', window.g.settings.cacheKey)
     return _url.toString()
   },
   loadScript(src) {
@@ -67,6 +67,29 @@ window._lnbitsUtils = {
         }
       })
   },
+  backupLocalStorage(backupKey, cleanup = false) {
+    const lnbitsEntries =
+      Object.entries(Quasar.LocalStorage.getAll()).filter(
+        ([k, v]) => k.startsWith('lnbits.') && k !== `lnbits.${backupKey}`
+      ) || []
+
+    Quasar.LocalStorage.setItem(`lnbits.${backupKey}`, lnbitsEntries)
+    if (cleanup) {
+      lnbitsEntries.forEach(([k, v]) => Quasar.LocalStorage.remove(k))
+    }
+  },
+  restoreLocalStorage(backupKey) {
+    Object.entries(Quasar.LocalStorage.getAll())
+      .filter(
+        ([k, v]) => k.startsWith('lnbits.') && k !== `lnbits.${backupKey}`
+      )
+      .forEach(([k, v]) => Quasar.LocalStorage.remove(k))
+
+    const lnbitsEntries =
+      Quasar.LocalStorage.getItem(`lnbits.${backupKey}`) || []
+    lnbitsEntries.forEach(([k, v]) => Quasar.LocalStorage.setItem(k, v))
+    Quasar.LocalStorage.remove(`lnbits.${backupKey}`)
+  },
   async digestMessage(message) {
     const msgUint8 = new TextEncoder().encode(message)
     const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8)
@@ -108,13 +131,76 @@ window._lnbitsUtils = {
       currency: currency || 'sat'
     }).format(value)
   },
+  getCurrencySymbol(currency) {
+    const code = (currency || '').toUpperCase()
+    if (code === 'BTC' || code === 'XBT' || code === 'SAT' || code === 'SATS') {
+      return '₿'
+    }
+    try {
+      const parts = new Intl.NumberFormat(window.i18n.global.locale, {
+        style: 'currency',
+        currency: code
+      }).formatToParts(0)
+      const symbolPart = parts.find(part => part.type === 'currency')
+      return symbolPart?.value || code || '¤'
+    } catch (e) {
+      return code || '¤'
+    }
+  },
   formatSat(value) {
     return new Intl.NumberFormat(window.i18n.global.locale).format(value)
   },
   formatMsat(value) {
     return this.formatSat(value / 1000)
   },
-  notifyApiError(error) {
+  parseJSONSafe(str) {
+    try {
+      return JSON.parse(str)
+    } catch (e) {
+      return null
+    }
+  },
+  isValidBech32(value) {
+    if (typeof value !== 'string') {
+      return false
+    }
+
+    const candidate = value.trim()
+    if (
+      !candidate ||
+      (candidate !== candidate.toLowerCase() &&
+        candidate !== candidate.toUpperCase())
+    ) {
+      return false
+    }
+
+    const normalized = candidate.toLowerCase()
+    const splitPosition = normalized.lastIndexOf('1')
+    if (splitPosition <= 0) {
+      return false
+    }
+
+    const humanReadablePart = normalized.substring(0, splitPosition)
+    const data = normalized.substring(splitPosition + 1)
+    if (data.length < 6) {
+      return false
+    }
+
+    if (
+      typeof bech32ToFiveBitArray !== 'function' ||
+      typeof verify_checksum !== 'function'
+    ) {
+      return false
+    }
+
+    const words = bech32ToFiveBitArray(data)
+    if (words.some(word => word < 0)) {
+      return false
+    }
+
+    return verify_checksum(humanReadablePart, words)
+  },
+  async notifyApiError(error) {
     if (!error.response) {
       return console.error(error)
     }
@@ -123,17 +209,32 @@ window._lnbitsUtils = {
       401: 'warning',
       500: 'negative'
     }
-    Quasar.Notify.create({
-      timeout: 5000,
-      type: types[error.response.status] || 'warning',
-      message:
-        error.response.data.message || error.response.data.detail || null,
-      caption:
-        [error.response.status, ' ', error.response.statusText]
-          .join('')
-          .toUpperCase() || null,
-      icon: null
-    })
+    let messages = error.response.data.detail
+    if (!messages) {
+      const text = await error.response.data?.text()
+      messages = this.parseJSONSafe(text)?.detail
+    }
+    if (messages) {
+      messages = Array.isArray(messages)
+        ? messages.map(e => e.msg + ` (${e.loc?.join('/')})`)
+        : (messages = [messages])
+    } else {
+      messages = [error.response.data.message || error.response.data.detail]
+    }
+
+    messages.forEach(message =>
+      Quasar.Notify.create({
+        timeout: 5000,
+        type: types[error.response.status] || 'warning',
+        message,
+        caption:
+          [error.response.status, ' ', error.response.statusText]
+            .join('')
+            .toUpperCase() || null,
+        icon: null,
+        closeBtn: true
+      })
+    )
   },
   search(data, q, field, separator) {
     try {
@@ -221,6 +322,20 @@ window._lnbitsUtils = {
     converter.setFlavor('github')
     converter.setOption('simpleLineBreaks', true)
     return converter.makeHtml(text)
+  },
+  _extI18nDirs: new Set(),
+  _extI18nLoaded: {},
+  loadExtI18n(dir, locale) {
+    this._extI18nDirs.add(dir)
+    const loaded = (this._extI18nLoaded[dir] ??= {})
+    if (loaded[locale]) return loaded[locale]
+    loaded[locale] = this.loadScript(`${dir}/${locale}.js`).catch(() => {
+      if (locale !== 'en') {
+        loaded['en'] ??= this.loadScript(`${dir}/en.js`).catch(() => {})
+        return loaded['en']
+      }
+    })
+    return loaded[locale]
   },
   async decryptLnurlPayAES(success_action, preimage) {
     let keyb = new Uint8Array(

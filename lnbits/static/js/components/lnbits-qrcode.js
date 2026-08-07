@@ -1,5 +1,4 @@
 window.app.component('lnbits-qrcode', {
-  mixins: [window.windowMixin],
   template: '#lnbits-qrcode',
   components: {
     QrcodeVue: QrcodeVue.default
@@ -35,7 +34,7 @@ window.app.component('lnbits-qrcode', {
     },
     logo: {
       type: String,
-      default: LNBITS_QR_LOGO
+      default: window.g.settings.qrLogo || null
     }
   },
   data() {
@@ -86,6 +85,9 @@ window.app.component('lnbits-qrcode', {
         event.preventDefault()
         event.stopPropagation()
         return false
+      } else if (this.href && this.href.startsWith('http')) {
+        window.open(this.href, '_blank')
+        event.preventDefault()
       }
     },
     async writeNfcTag() {
@@ -166,5 +168,26 @@ window.app.component('lnbits-qrcode', {
     this.$refs.qrCode.$el.style.maxWidth = this.maxWidth + 'px'
     this.$refs.qrCode.$el.setAttribute('width', '100%')
     this.$refs.qrCode.$el.removeAttribute('height')
+  },
+  computed: {
+    optimizedValue() {
+      const separatorIndex = this.value.indexOf(':')
+      const type =
+        separatorIndex === -1 ? '' : this.value.substring(0, separatorIndex)
+      const value =
+        separatorIndex === -1
+          ? this.value
+          : this.value.substring(separatorIndex + 1)
+
+      if (this.utils.isValidBech32(value)) {
+        const normalizedValue = value.toUpperCase()
+        if (type) {
+          return `${type.toUpperCase()}:${normalizedValue}`
+        }
+        return normalizedValue
+      }
+
+      return this.value
+    }
   }
 })

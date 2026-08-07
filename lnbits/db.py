@@ -12,7 +12,6 @@ from typing import Any, Generic, Literal, TypeVar, get_origin
 
 from loguru import logger
 from pydantic import BaseModel, ValidationError, root_validator
-from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 from sqlalchemy.sql import text
 
@@ -36,7 +35,7 @@ if settings.lnbits_database_url:
     else:
         if not database_uri.startswith("postgres://"):
             raise ValueError(
-                "Please use the 'postgres://...' " "format for the database URL."
+                "Please use the 'postgres://...' format for the database URL."
             )
         DB_TYPE = POSTGRES
 
@@ -54,14 +53,6 @@ def compat_timestamp_placeholder(key: str):
         return f"cast(:{key} AS timestamp)"
     else:
         return f":{key}"
-
-
-def get_placeholder(model: Any, field: str) -> str:
-    type_ = model.__fields__[field].type_
-    if type_ == datetime:
-        return compat_timestamp_placeholder(field)
-    else:
-        return f":{field}"
 
 
 class Compat:
@@ -326,30 +317,7 @@ class Database(Compat):
         self.engine: AsyncEngine = create_async_engine(
             database_uri, echo=settings.debug_database
         )
-
-        if self.type in {POSTGRES, COCKROACH}:
-
-            @event.listens_for(self.engine.sync_engine, "connect")
-            def register_custom_types(dbapi_connection, *_):
-                def _parse_date(value) -> datetime:
-                    if value is None:
-                        value = "1970-01-01 00:00:00"
-                    f = "%Y-%m-%d %H:%M:%S.%f"
-                    if "." not in value:
-                        f = "%Y-%m-%d %H:%M:%S"
-                    return datetime.strptime(value, f)
-
-                dbapi_connection.run_async(
-                    lambda connection: connection.set_type_codec(
-                        "TIMESTAMP",
-                        encoder=datetime,
-                        decoder=_parse_date,
-                        schema="pg_catalog",
-                    )
-                )
-
         self.lock = asyncio.Lock()
-
         logger.trace(f"database {self.type} added for {self.name}")
 
     @asynccontextmanager
@@ -592,7 +560,9 @@ class Filters(BaseModel, Generic[TFilterModel]):
 
     def pagination(self) -> str:
         stmt = ""
-        self.limit = self.limit or 10
+        if self.limit == 0:
+            self.limit = 1000
+        self.limit = 10 if self.limit is None else self.limit
         stmt += f"LIMIT {min(1000, self.limit)} "
         if self.offset:
             stmt += f"OFFSET {self.offset}"
@@ -645,6 +615,12 @@ class Filters(BaseModel, Generic[TFilterModel]):
         for page_filter in self.filters:
             page_filter.table_name = table_name
 
+    def get_filter_by_field(self, field: str) -> Filter[TFilterModel] | None:
+        return next((f for f in self.filters if f.field == field), None)
+
+    def remove_filter_by_field(self, field: str) -> None:
+        self.filters = [f for f in self.filters if f.field != field]
+
 
 class DbJsonEncoder(json.JSONEncoder):
     def default(self, o):
@@ -662,7 +638,7 @@ def insert_query(table_name: str, model: BaseModel) -> str:
     placeholders = []
     keys = model_to_dict(model).keys()
     for field in keys:
-        placeholders.append(get_placeholder(model, field))
+        placeholders.append(f":{field}")
     # add quotes to keys to avoid SQL conflicts (e.g. `user` is a reserved keyword)
     fields = ", ".join([f'"{key}"' for key in keys])
     values = ", ".join(placeholders)
@@ -680,9 +656,8 @@ def update_query(
     """
     fields = []
     for field in model_to_dict(model).keys():
-        placeholder = get_placeholder(model, field)
         # add quotes to keys to avoid SQL conflicts (e.g. `user` is a reserved keyword)
-        fields.append(f'"{field}" = {placeholder}')
+        fields.append(f'"{field}" = :{field}')
     query = ", ".join(fields)
     return f"UPDATE {table_name} SET {query} {where}"  # noqa: S608
 
@@ -700,7 +675,12 @@ def model_to_dict(model: BaseModel) -> dict:
         if model.__fields__[key].field_info.extra.get("no_database", False):
             continue
         if isinstance(value, datetime):
-            _dict[key] = value.timestamp()
+            if DB_TYPE == SQLITE:
+                _dict[key] = value.timestamp()
+            else:
+                # remove tz. postgres and cockroach TIMESTAMP is not tz aware
+                # so it will throw if we dont remove the UTC.
+                _dict[key] = value.replace(tzinfo=None)
             continue
         if (
             type(type_) is type(BaseModel)
@@ -756,7 +736,7 @@ def dict_to_model(_row: dict, model: type[TModel]) -> TModel:  # noqa: C901
             if DB_TYPE == SQLITE:
                 _dict[key] = datetime.fromtimestamp(value, timezone.utc)
             else:
-                _dict[key] = value
+                _dict[key] = value.replace(tzinfo=timezone.utc)
             continue
         if issubclass(type_, BaseModel):
             _dict[key] = dict_to_submodel(type_, value)

@@ -66,7 +66,7 @@ window._lnbitsApi = {
       name: name
     })
   },
-  register(username, email, password, password_repeat) {
+  register(username, email, password, password_repeat, invitation_code) {
     return axios({
       method: 'POST',
       url: '/api/v1/auth/register',
@@ -74,7 +74,8 @@ window._lnbitsApi = {
         username,
         email,
         password,
-        password_repeat
+        password_repeat,
+        invitation_code
       }
     })
   },
@@ -123,6 +124,19 @@ window._lnbitsApi = {
       url: '/api/v1/auth/logout'
     })
   },
+  impersonateUser(usr) {
+    return axios({
+      method: 'POST',
+      url: '/api/v1/auth/impersonate',
+      data: {usr}
+    })
+  },
+  stopImpersonation() {
+    return axios({
+      method: 'DELETE',
+      url: '/api/v1/auth/impersonate'
+    })
+  },
   getAuthenticatedUser() {
     return this.request('get', '/api/v1/auth')
   },
@@ -134,12 +148,15 @@ window._lnbitsApi = {
       name: name,
       wallet_type: walletType,
       ...opts
-    }).catch(LNbits.utils.notifyApiError)
+    })
   },
   updateWallet(name, wallet) {
     return this.request('patch', '/api/v1/wallet', wallet.adminkey, {
       name: name
     })
+  },
+  updateUiCustomization(data = {}) {
+    return this.request('patch', '/api/v1/auth/ui', null, data)
   },
   resetWalletKeys(wallet) {
     return this.request('put', `/api/v1/wallet/reset/${wallet.id}`).then(
