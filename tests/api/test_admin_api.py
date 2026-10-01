@@ -5,7 +5,7 @@ from httpx import AsyncClient
 
 from lnbits.core.crud.settings import get_settings_field, set_settings_field
 from lnbits.server import server_restart
-from lnbits.settings import Settings
+from lnbits.settings import DEFAULT_WASM_MANIFESTS, Settings
 
 
 @pytest.mark.anyio
@@ -23,6 +23,7 @@ async def test_admin_get_settings(client: AsyncClient, superuser_token: str):
     assert response.status_code == 200
     result = response.json()
     assert "super_user" not in result
+    assert result["lnbits_wasm_extensions_manifests"] == DEFAULT_WASM_MANIFESTS
 
 
 @pytest.mark.anyio
@@ -82,7 +83,9 @@ async def test_admin_audit_monitor_and_test_email(
         headers={"Authorization": f"Bearer {superuser_token}"},
     )
     assert monitor.status_code == 200
-    assert "invoice_listeners" in monitor.json()
+    task_names = [t["name"] for t in monitor.json()]
+    assert "core_invoice_listener" in task_names
+    assert "core_wasm_invoice_listener" in task_names
 
     test_email = await client.get(
         "/admin/api/v1/testemail",

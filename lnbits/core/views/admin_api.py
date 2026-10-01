@@ -1,12 +1,15 @@
 import os
 import time
 from http import HTTPStatus
+from pathlib import Path
 from shutil import make_archive
 from subprocess import Popen
-from urllib.parse import urlparse
+from typing import cast
 
 from fastapi import APIRouter, Depends, File
 from fastapi.responses import FileResponse
+from sqlalchemy.engine import URL, make_url
+from sqlalchemy.exc import ArgumentError
 
 from lnbits.core.models.notifications import NotificationType
 from lnbits.core.models.users import Account
@@ -20,7 +23,7 @@ from lnbits.core.services.settings import dict_to_settings
 from lnbits.decorators import check_admin, check_super_user
 from lnbits.server import server_restart
 from lnbits.settings import AdminSettings, Settings, UpdateSettings, settings
-from lnbits.tasks import invoice_listeners
+from lnbits.task_manager import PublicTask, task_manager
 
 from .. import core_app_extra
 from ..crud import get_admin_settings, reset_core_settings, update_admin_settings
@@ -44,11 +47,10 @@ async def api_auditor():
     name="Monitor",
     description="show the current listeners and other monitoring data",
     dependencies=[Depends(check_admin)],
+    response_model=list[PublicTask],
 )
-async def api_monitor():
-    return {
-        "invoice_listeners": list(invoice_listeners.keys()),
-    }
+async def api_monitor() -> list[PublicTask]:
+    return task_manager.get_public_tasks()
 
 
 @admin_router.get(
@@ -142,31 +144,56 @@ async def api_download_backup() -> FileResponse:
     last_filename = "lnbits-backup"
     filename = f"lnbits-backup-{int(time.time())}.zip"
     db_url = settings.lnbits_database_url
-    pg_backup_filename = f"{settings.lnbits_data_folder}/lnbits-database.dmp"
+    pg_backup_filename = Path(settings.lnbits_data_folder) / "lnbits-database.dmp"
     is_pg = db_url and db_url.startswith("postgres://")
 
     if is_pg and db_url:
-        p = urlparse(db_url)
-        command = (
-            f"pg_dump --host={p.hostname} "
-            f"--dbname={p.path.replace('/', '')} "
-            f"--username={p.username} "
-            "--no-password "
-            "--format=c "
-            f"--file={pg_backup_filename}"
-        )
-        proc = Popen(
-            command, shell=True, env={**os.environ, "PGPASSWORD": p.password or ""}
-        )
-        proc.wait()
-
-    make_archive(last_filename, "zip", settings.lnbits_data_folder)
-
-    # cleanup pg_dump file
-    if is_pg:
-        proc = Popen(f"rm {pg_backup_filename}", shell=True)
-        proc.wait()
+        env = _build_pg_dump_env(db_url)
+        try:
+            proc = Popen(
+                [
+                    "pg_dump",
+                    "--no-password",
+                    "--format=c",
+                    f"--file={pg_backup_filename}",
+                ],
+                shell=False,
+                env=env,
+            )
+            if proc.wait() != 0:
+                raise ValueError("PostgreSQL database backup failed.")
+            make_archive(last_filename, "zip", settings.lnbits_data_folder)
+        finally:
+            pg_backup_filename.unlink(missing_ok=True)
+    else:
+        make_archive(last_filename, "zip", settings.lnbits_data_folder)
 
     return FileResponse(
         path=f"{last_filename}.zip", filename=filename, media_type="application/zip"
     )
+
+
+def _build_pg_dump_env(database_url: str) -> dict[str, str]:
+    try:
+        url = cast(URL, make_url(database_url))
+    except (ArgumentError, ValueError) as exc:
+        raise ValueError("Invalid PostgreSQL database URL.") from exc
+    if url.drivername != "postgres":
+        raise ValueError("Invalid PostgreSQL database URL.")
+
+    # Match the connection arguments used by SQLAlchemy's asyncpg dialect.
+    parameters = url.translate_connect_args(username="user")
+    parameters.update(url.query)
+    env = os.environ.copy()
+    for parameter, variable in {
+        "host": "PGHOST",
+        "port": "PGPORT",
+        "user": "PGUSER",
+        "password": "PGPASSWORD",
+        "database": "PGDATABASE",
+        "ssl": "PGSSLMODE",
+    }.items():
+        value = parameters.get(parameter)
+        if value is not None:
+            env[variable] = ",".join(value) if isinstance(value, tuple) else str(value)
+    return env

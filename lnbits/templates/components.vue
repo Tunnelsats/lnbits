@@ -8,9 +8,12 @@ include('components/admin/users.vue') %} {%
 include('components/admin/site_customisation.vue') %} {%
 include('components/admin/audit.vue') %} {%
 include('components/admin/extensions.vue') %} {%
+include('components/admin/wasm-runtime.vue') %} {%
+include('components/admin/wasm-limit-config.vue') %} {%
 include('components/admin/assets-config.vue') %} {%
 include('components/admin/notifications.vue') %} {%
 include('components/admin/server.vue') %} {%
+include('components/admin/blockexplorer.vue') %} {%
 include('components/lnbits-qrcode.vue') %} {%
 include('components/lnbits-qrcode-scanner.vue') %} {%
 include('components/lnbits-disclaimer.vue') %} {%
@@ -20,6 +23,7 @@ include('components/lnbits-header-wallets.vue') %} {%
 include('components/lnbits-drawer.vue') %} {%
 include('components/lnbits-home-logos.vue') %} {%
 include('components/lnbits-manage-extension-list.vue') %} {%
+include('components/lnbits-extension-permissions.vue') %} {%
 include('components/lnbits-manage-wallet-list.vue') %} {%
 include('components/lnbits-language-dropdown.vue') %} {%
 include('components/lnbits-payment-list.vue') %} {%
@@ -36,6 +40,21 @@ include('components/lnbits-error.vue') %}
 <template id="lnbits-manage">
   <q-list v-if="g.user" dense class="lnbits-drawer__q-list">
     <q-item-label header v-text="$t('manage')"></q-item-label>
+    <q-item to="/account">
+      <q-item-section side>
+        <q-icon
+          name="person"
+          :color="isActive('/account') ? 'primary' : 'grey-5'"
+          size="md"
+        ></q-icon>
+      </q-item-section>
+      <q-item-section>
+        <q-item-label lines="1" v-text="$t('my_account')"></q-item-label>
+      </q-item-section>
+      <q-item-section side v-show="isActive('/account')">
+        <q-icon name="chevron_right" color="grey-5" size="md"></q-icon>
+      </q-item-section>
+    </q-item>
     <div v-if="g.user.admin">
       <q-item v-if="g.settings.showAdmin" to="/admin">
         <q-item-section side>
@@ -98,6 +117,29 @@ include('components/lnbits-error.vue') %}
         </q-item-section>
       </q-item>
     </div>
+    <q-item
+      v-if="
+        g.settings.showBlockExplorer &&
+        (g.user.admin ||
+          (g.settings.blockExplorerPublic &&
+            g.settings.blockExplorerInUserMenu))
+      "
+      to="/blockexplorer"
+    >
+      <q-item-section side>
+        <q-icon
+          name="travel_explore"
+          :color="isActive('/blockexplorer') ? 'primary' : 'grey-5'"
+          size="md"
+        ></q-icon>
+      </q-item-section>
+      <q-item-section>
+        <q-item-label lines="1" v-text="$t('block_explorer')"></q-item-label>
+      </q-item-section>
+      <q-item-section side v-show="isActive('/blockexplorer')">
+        <q-icon name="chevron_right" color="grey-5" size="md"></q-icon>
+      </q-item-section>
+    </q-item>
     <q-item to="/payments">
       <q-item-section side>
         <q-icon

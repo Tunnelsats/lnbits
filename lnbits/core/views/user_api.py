@@ -41,8 +41,14 @@ from lnbits.core.services import (
     update_user_extensions,
     update_wallet_balance,
 )
+from lnbits.core.services.lightning_address import set_wallet_lightning_address
 from lnbits.db import Filters, Page
-from lnbits.decorators import check_admin, check_super_user, parse_filters
+from lnbits.decorators import (
+    check_admin,
+    check_api_write_access,
+    check_super_user,
+    parse_filters,
+)
 from lnbits.helpers import (
     encrypt_internal_message,
     generate_filter_params_openapi,
@@ -73,10 +79,14 @@ async def api_get_users(
     name="Get user",
     summary="Get user by Id",
 )
-async def api_get_user(user_id: str) -> User:
+async def api_get_user(
+    user_id: str,
+    can_write: bool = Depends(check_api_write_access),
+) -> User:
     user = await get_user(user_id, active_only=False)
     if not user:
         raise HTTPException(HTTPStatus.NOT_FOUND, "User not found.")
+    user.wallets = [wallet.copy_with_keys(keep=can_write) for wallet in user.wallets]
     return user
 
 
@@ -158,10 +168,6 @@ async def api_update_user(
 async def api_users_delete_user(
     user_id: str, account: Account = Depends(check_admin)
 ) -> SimpleStatus:
-    wallets = await get_wallets(user_id, deleted=False)
-    for wallet in wallets:
-        await delete_wallet_by_id(wallet.id)
-
     if user_id == settings.super_user:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
@@ -173,6 +179,11 @@ async def api_users_delete_user(
             status_code=HTTPStatus.BAD_REQUEST,
             detail="Only super_user can delete admin user.",
         )
+
+    wallets = await get_wallets(user_id, deleted=False)
+    for wallet in wallets:
+        await delete_wallet_by_id(wallet.id)
+
     await delete_account(user_id)
     return SimpleStatus(success=True, message="User deleted.")
 
@@ -259,8 +270,12 @@ async def api_users_toggle_activated(
 
 
 @users_router.get("/user/{user_id}/wallet", name="Get wallets for user")
-async def api_users_get_user_wallet(user_id: str) -> list[Wallet]:
-    return await get_wallets(user_id, deleted=None)
+async def api_users_get_user_wallet(
+    user_id: str,
+    can_write: bool = Depends(check_api_write_access),
+) -> list[Wallet]:
+    wallets = await get_wallets(user_id, deleted=None)
+    return [wallet.copy_with_keys(keep=can_write) for wallet in wallets]
 
 
 @users_router.post("/user/{user_id}/wallet", name="Create a new wallet for user")
@@ -277,6 +292,34 @@ async def api_users_create_user_wallet(
         await update_wallet(wallet)
 
     return wallet
+
+
+@users_router.put(
+    "/user/{user_id}/wallet/{wallet}/lightning-address",
+    name="Set wallet Lightning Address",
+)
+async def api_users_set_wallet_lightning_address(
+    user_id: str,
+    wallet: str,
+    lightning_address: str = Body(..., embed=True),
+) -> Wallet:
+    wal = await get_wallet(wallet)
+    if not wal:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail="Wallet does not exist.",
+        )
+    if user_id != wal.user:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Wallet does not belong to user.",
+        )
+    return await set_wallet_lightning_address(
+        wallet=wal,
+        local_part=lightning_address,
+        allow_blacklisted=True,
+        charge=False,
+    )
 
 
 @users_router.put(

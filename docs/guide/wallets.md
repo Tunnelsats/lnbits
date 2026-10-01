@@ -41,7 +41,7 @@ A backend wallet is selected and configured entirely through LNbits environment 
 | [CoreLightning REST](#corelightning-rest)       | [LNbits](#lnbits)                     | [Alby](#alby)                                     |
 | [Spark (Core Lightning)](#spark-core-lightning) | [LNPay](#lnpay)                       | [Boltz](#boltz)                                   |
 | [Spark L2](#spark-l2)                           | [ZBD](#zbd)                           | [Phoenixd](#phoenixd)                             |
-| [Cliche Wallet](#cliche-wallet)                 |                                       |                                                   |
+| [Cliche Wallet](#cliche-wallet)                 | [Bark](#bark)                         |                                                   |
 | [Breez SDK](#breez-sdk)                         | [Breez Liquid SDK](#breez-liquid-sdk) | [Nostr Wallet Connect](#nostr-wallet-connect-nwc) |
 | [Strike](#strike)                               | [Eclair (ACINQ)](#eclair-acinq)       | [LN.tips](#lntips)                                |
 | [Fake Wallet](#fake-wallet)                     |                                       |                                                   |
@@ -127,6 +127,22 @@ Old REST interface using [RTL c-lightning-REST](https://github.com/Ride-The-Ligh
 - `SPARK_URL`: `http://10.147.17.230:9737/rpc`
 - `SPARK_TOKEN`: `secret_access_key`
 
+## Bark
+
+This connects LNbits to an external [barkd](https://second.tech/docs/barkd) REST daemon. Initialize the Bark wallet before starting LNbits using `bark create`, then run `barkd` separately, keep its data directory persistent, and set `BARK_API_TOKEN` to the auth token from `~/.bark/auth_token`.
+
+**Required env vars**
+
+- `LNBITS_BACKEND_WALLET_CLASS`: `BarkWallet`
+- `BARK_API_ENDPOINT`: `http://localhost:3000`
+- `BARK_API_TOKEN`: `auth_token`
+
+Bark fee estimates can be higher than LNbits' default minimum routing fee reserve. If small outgoing payments fail with an error like `fee of 20000 msat exceeds limit of 5000 msat`, raise the minimum reserve fee under **Settings → Funding** or set:
+
+```bash
+LNBITS_RESERVE_FEE_MIN=20000
+```
+
 ## Spark L2
 
 Self-custodial funding source using the [Spark L2](https://docs.spark.money/start/overview) network. Requires a Node.js [sidecar](https://github.com/lnbits/spark_sidecar) that bridges lnbits talking to Spark. Works in addition with any Spark-compatible seed (Wallet of Satoshi, BuhoGO, BlitzWallet).
@@ -197,7 +213,7 @@ uv run lnbits-cli encrypt macaroon
 
 ## LNPay
 
-For the invoice listener to work you must have a publicly accessible URL in your LNbits and set up [LNPay webhooks](https://dashboard.lnpay.co/webhook/) pointing to `<your LNbits host>/wallet/webhook` with the event **Wallet Receive** and no secret. Example: [https://mylnbits/wallet/webhook](`https://mylnbits/wallet/webhook).
+For the invoice listener to work you must have a publicly accessible URL in your LNbits and set up [LNPay webhooks](https://dashboard.lnpay.co/webhook/) pointing to `<your LNbits host>/wallet/webhook` with the event **Wallet Receive** and no secret. Example: `https://mylnbits.example/wallet/webhook`.
 
 **Required env vars**
 
@@ -273,15 +289,34 @@ Generate a ZBD API key here: [https://zbd.dev/docs/dashboard/projects/api](https
 
 ## Phoenixd
 
-For the invoice to work you must have a publicly accessible URL in your LNbits.
+This backend connects to ACINQ's standalone [Phoenixd daemon](https://github.com/ACINQ/phoenixd), the server counterpart of Phoenix. It does not connect to the mobile wallet or Eclair. LNbits uses Phoenixd's HTTP API and websocket; a public LNbits URL is not required for this connection.
 
-You can get a phoenixd API key from `~/.phoenix/phoenix.conf`. See the phoenixd documentation for details.
+Use the full-access `http-password` from `~/.phoenix/phoenix.conf` as the API password. The limited-access password cannot send payments or perform channel management.
 
 **Required env vars**
 
 - `LNBITS_BACKEND_WALLET_CLASS`: `PhoenixdWallet`
 - `PHOENIXD_API_ENDPOINT`: `http://localhost:9740/`
 - `PHOENIXD_API_PASSWORD`: `PhoenixdApiPassword`
+
+### Node management
+
+Enable **Node UI** in **Server → Funding** after selecting Phoenixd. Enable node transactions separately to browse the daemon's payment history. Admins can inspect the node; withdrawals, channel closure, fee bumps and server-side CSV exports require the LNbits superuser.
+
+The page provides:
+
+- Channel IDs, funding transaction IDs, states, capacity, spendable balance and inbound liquidity. Pending states without balance information are also listed. Phoenixd's `/getinfo` channel summary is used instead of exposing raw `/listchannels` internal state.
+- Daemon version, Bitcoin network, block height and fee credit. Fee credit pays future liquidity fees and is not added to spendable balance.
+- Inbound liquidity fee estimates, split into mining and service fees. Estimates do not buy liquidity; automatic liquidity policy is configured in `phoenix.conf`.
+- Cooperative channel closure to a specified Bitcoin address and fee rate, onchain withdrawals using splice-out, and funding transaction fee bumps. Each action requires confirmation and displays the resulting transaction ID. These operations spend funds backing LNbits wallets.
+- The daemon's BOLT12 receive offer and Lightning address. Phoenixd versions with a swap-in wallet also expose its deposit address and unconfirmed, weakly confirmed and deeply confirmed balances.
+- Incoming invoices and outgoing payments, including liquidity purchases, splice-outs, fee bumps and channel closures. History loads one page at a time; the displayed count is a navigation bound, not an exact lifetime total. CSV export writes a file into the **Phoenixd daemon's** `exports` directory, not the LNbits server or browser.
+
+Management controls are enabled for Phoenixd **0.7.3 or newer**, with request formats checked against ACINQ's [v0.7.3 API](https://github.com/ACINQ/phoenixd/blob/v0.7.3/src/commonMain/kotlin/fr/acinq/phoenixd/Api.kt) and [v0.9.0 API](https://github.com/ACINQ/phoenixd/blob/v0.9.0/src/commonMain/kotlin/fr/acinq/phoenixd/Api.kt). Swap-in controls appear only when the daemon reports a swap-in wallet (introduced in the v0.9.0 API). Older or unrecognised versions retain the overview and history, with management controls hidden.
+
+Phoenixd manages channel opening, resizing and its ACINQ connection automatically. Its API does not expose manual peer management, routing fee policies, force-close, or a manual liquidity purchase operation. Public node rankings do not apply to these private managed channels. Payment creation and Lightning sending remain in LNbits' wallet interface; seed handling remains in funding-source backup settings.
+
+Phoenixd can report an operation failure with HTTP 200. LNbits only reports a successful withdrawal, close or fee bump when Phoenixd returns a transaction ID. After a timeout, inspect channels and payment history before retrying.
 
 ## Eclair (ACINQ)
 

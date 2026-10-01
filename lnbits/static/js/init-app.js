@@ -67,6 +67,18 @@ const routes = [
     component: PageNodePublic
   },
   {
+    path: '/blockexplorer/:type(tx|address|block)?/:id?',
+    name: 'BlockExplorer',
+    component: PageBlockExplorer,
+    meta: {stableKey: true}
+  },
+  {
+    path: '/blockexplorer/public/:type(tx|address|block)?/:id?',
+    name: 'BlockExplorerPublic',
+    component: PageBlockExplorer,
+    meta: {stableKey: true}
+  },
+  {
     path: '/payments',
     name: 'Payments',
     component: PagePayments
@@ -98,6 +110,26 @@ const routes = [
     path: '/users',
     name: 'Users',
     component: PageUsers
+  },
+  {
+    path: '/admin/extensions/wasm',
+    name: 'AdminWasmRuntime',
+    component: PageAdmin
+  },
+  {
+    path: '/admin/extensions/wasm/limits',
+    name: 'AdminWasmLimitConfig',
+    component: PageAdmin
+  },
+  {
+    path: '/admin/extensions/wasm/limits/:extId',
+    name: 'AdminWasmLimitConfigDetail',
+    component: PageAdmin
+  },
+  {
+    path: '/admin/extensions/wasm/:extId',
+    name: 'AdminWasmRuntimeDetail',
+    component: PageAdmin
   },
   {
     path: '/admin',
@@ -138,6 +170,16 @@ const routes = [
     path: '/error',
     name: 'PageError',
     component: PageError
+  },
+  {
+    path: '/ext/:extId',
+    name: 'WasmExtensionRoot',
+    component: window.WasmExtensionComponent
+  },
+  {
+    path: '/ext/:extId/:pathMatch(.*)*',
+    name: 'WasmExtension',
+    component: window.WasmExtensionComponent
   },
   {
     path: '/:pathMatch(.*)*',

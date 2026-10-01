@@ -14,9 +14,11 @@ from loguru import logger
 from websockets import connect
 
 from lnbits.helpers import normalize_endpoint
+from lnbits.nodes.phoenixd import PhoenixdNode
 from lnbits.settings import settings
 
 from .base import (
+    Feature,
     InvoiceResponse,
     PaymentFailedStatus,
     PaymentPendingStatus,
@@ -30,6 +32,9 @@ from .base import (
 
 class PhoenixdWallet(Wallet):
     """https://phoenix.acinq.co/server/api"""
+
+    __node_cls__ = PhoenixdNode
+    features = [Feature.nodemanager]
 
     def __init__(self):
         if not settings.phoenixd_api_endpoint:
@@ -98,6 +103,24 @@ class PhoenixdWallet(Wallet):
             logger.warning(exc)
             return StatusResponse(f"Unable to connect to {self.endpoint}.", 0)
 
+    async def _incoming_preimage(self, payment_hash: str) -> str | None:
+        """Fetch preimage from Phoenixd incoming payment (createinvoice omits it)."""
+        try:
+            r = await self.client.get(
+                f"/payments/incoming/{payment_hash}",
+                timeout=40,
+            )
+            if r.is_error:
+                return None
+            return r.json().get("preimage") or None
+        except Exception as exc:
+            logger.warning(
+                "Phoenixd: could not fetch preimage for %s: %s",
+                payment_hash,
+                exc,
+            )
+            return None
+
     async def create_invoice(
         self,
         amount: int,
@@ -147,7 +170,10 @@ class PhoenixdWallet(Wallet):
 
             checking_id = data["paymentHash"]
             payment_request = data["serialized"]
-            preimage = data.get("paymentPreimage", None)  # if available
+            # Phoenixd createinvoice often omits paymentPreimage.
+            preimage = data.get("paymentPreimage") or await self._incoming_preimage(
+                checking_id
+            )
             return InvoiceResponse(
                 ok=True,
                 checking_id=checking_id,
@@ -187,11 +213,11 @@ class PhoenixdWallet(Wallet):
             logger.warning(msg)
             return PaymentResponse(ok=None, error_message=msg)
         except RequestError as exc:
-            # RequestError is raised when the request never hit the destination server
+            # RequestError can also be raised after the server received the request.
             msg = f"Unable to connect to {self.endpoint}."
             logger.warning(msg)
             logger.warning(exc)
-            return PaymentResponse(ok=False, error_message=msg)
+            return PaymentResponse(ok=None, error_message=msg)
         except Exception as exc:
             logger.warning(exc)
             return PaymentResponse(

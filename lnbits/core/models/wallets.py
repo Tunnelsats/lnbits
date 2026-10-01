@@ -126,6 +126,7 @@ class Wallet(BaseWallet):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     currency: str | None = None
+    lightning_address: str | None = None
     balance_msat: int = Field(default=0, no_database=True)
     extra: WalletExtra = WalletExtra()
     stored_paylinks: StoredPayLinks = StoredPayLinks()
@@ -135,6 +136,14 @@ class Wallet(BaseWallet):
     def __init__(self, **data):
         super().__init__(**data)
         self._validate_data()
+
+    def copy_with_keys(self, keep: bool = True) -> Wallet:
+        """Return a wallet copy, masking its credentials when keep is False."""
+        wallet = self.copy()
+        if not keep:
+            wallet.adminkey = "*" * 32
+            wallet.inkey = "*" * 32
+        return wallet
 
     def mirror_shared_wallet(
         self,
@@ -150,6 +159,7 @@ class Wallet(BaseWallet):
 
         if len(self.share_permissions):
             self.currency = shared_wallet.currency
+            self.lightning_address = shared_wallet.lightning_address
             self.balance_msat = shared_wallet.balance_msat
 
             self.stored_paylinks = shared_wallet.stored_paylinks
@@ -240,10 +250,18 @@ class BaseWalletTypeInfo:
 
 
 class WalletsFilters(FilterModel):
-    __search_fields__ = ["id", "name", "currency"]
+    __search_fields__ = ["id", "name", "currency", "lightning_address"]
 
-    __sort_fields__ = ["id", "name", "currency", "created_at", "updated_at"]
+    __sort_fields__ = [
+        "id",
+        "name",
+        "currency",
+        "lightning_address",
+        "created_at",
+        "updated_at",
+    ]
 
     id: str | None
     name: str | None
     currency: str | None
+    lightning_address: str | None

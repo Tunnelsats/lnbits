@@ -32,6 +32,18 @@ window.localisation.en = {
   image_library: 'Image Library',
   save: 'Save',
   save_tooltip: 'Save your changes',
+  advanced: 'Advanced',
+  admin_settings: 'Instance settings',
+  admin_settings_description:
+    'Configure payments, access, integrations, and appearance for this LNbits instance.',
+  search_settings: 'Search settings…',
+  no_settings_found: 'No matching settings found',
+  unsaved_changes: 'Unsaved changes',
+  all_changes_saved: 'All changes saved',
+  settings_money: 'Money',
+  settings_access: 'Access',
+  settings_system: 'System',
+  settings_appearance: 'Appearance',
   must_save: 'You have unsaved changes',
   credit_debit: 'Credit / Debit',
   credit_hint: 'Press Enter to credit/debit wallet (negative values allowed)',
@@ -44,7 +56,8 @@ window.localisation.en = {
   reset_defaults_tooltip: 'Delete all settings and reset to defaults.',
   download_backup: 'Download database backup',
   name_your_wallet: 'Name your {name} wallet',
-  paste_invoice_label: 'Paste an invoice, payment request or lnurl code *',
+  paste_invoice_label:
+    'Paste an invoice, payment request, Lightning Address or LNURL*',
   lnbits_description:
     'Easy to set up and lightweight, LNbits can run on any Lightning Network funding source and even LNbits itself! You can run LNbits for yourself, or easily offer a custodian solution for others. Each wallet has its own API keys and there is no limit to the number of wallets you can make. Being able to partition funds makes LNbits a useful tool for money management and as a development tool. Extensions add extra functionality to LNbits so you can experiment with a range of cutting-edge technologies on the lightning network. We have made developing extensions as easy as possible, and as a free and open-source project, we encourage people to develop and submit their own.',
   export_to_phone: 'Export to Phone with QR Code',
@@ -64,6 +77,7 @@ window.localisation.en = {
   wallets: 'Wallets',
   exclude_wallets: 'Exclude Wallets',
   add_wallet: 'Add wallet',
+  add_field: 'Add field',
   reject_wallet: 'Reject wallet',
   add_new_wallet: 'Add a new wallet',
   pin_wallet: 'Pin wallet',
@@ -98,6 +112,10 @@ window.localisation.en = {
   view_swagger_docs: 'View LNbits Swagger API docs',
   api_docs: 'API docs',
   api_keys_api_docs: 'Node URL, API keys and API docs',
+  api_keys_warning:
+    'These keys should be kept safe, sharing them could risk losing funds.',
+  admin_key_warning:
+    'Your admin key grants full access to your wallet, including the ability to send payments. Never share it unless you fully trust the recipient.',
   lnbits_version: 'LNbits version',
   runs_on: 'Runs on',
   paste: 'Paste',
@@ -116,6 +134,7 @@ window.localisation.en = {
   read: 'Read',
   write: 'Write',
   pay: 'Pay',
+  sending: 'Sending',
   memo: 'Memo',
   date: 'Date',
   path: 'Path',
@@ -161,6 +180,10 @@ window.localisation.en = {
   ext_sources_hint: 'Repositories from where the extensions can be downloaded',
   ext_sources_label:
     'Source URL (only use the official LNbits extension source, and sources you can trust)',
+  wasm_sources_hint:
+    'Repositories from where WASM extensions can be downloaded',
+  wasm_sources_label:
+    'WASM source URL (only use WASM extension sources you can trust)',
   warning: 'Warning',
   repository: 'Repository',
   confirm_continue: 'Are you sure you want to continue?',
@@ -392,18 +415,38 @@ window.localisation.en = {
   allow_access_hint: 'Allow access by IP (will override blocked IPs)',
   enter_ip: 'Enter an IP address and press enter',
   rate_limiter: 'Rate Limiter',
+  callback: 'Callback',
   callback_url_rules: 'Callback URL Rules',
   enter_callback_url_rule: 'Enter URL rule as regex and hit enter',
   callback_url_rule_hint:
-    'Callback URLs (like LNURL one) will be validated against these rules. At leat one rule must match. No rule means all URLs are allowed.',
-  wallet_limiter: 'Wallet Limiter',
+    'Callback URL origins are validated against these rules. At least one rule must match. No rules allow any valid origin; private targets still require the private-IP option.',
+  callback_allow_private_ips:
+    'Allow private IP addresses for callback requests',
+  callback_allow_private_ips_hint:
+    'Development only. Allows callbacks to localhost and private network addresses.',
+  lnurl: 'LNURL',
+  lnurl_redirect_url_rules: 'LNURL Redirect URL Rules',
+  lnurl_redirect_url_rule_hint:
+    'Redirects are denied unless their destination origin matches one of these rules. No rules means redirects are disabled.',
+  lnurl_allow_private_ips: 'Allow private IP addresses for LNURL requests',
+  lnurl_allow_private_ips_hint:
+    'Development only. Allows LNURL requests to localhost and private network addresses.',
+  wallet_limiter: 'Wallet limits',
+  wallet_limiter_desc:
+    'Global balance, withdrawal, and transaction limits for every wallet.',
+  wallet_limiter_warning:
+    'These limits apply to every wallet and can prevent outgoing payments.',
   wallet_config: 'Wallet Config',
   wallet_charts: 'Wallet Charts',
-  wallet_limit_max_withdraw_per_day:
-    'Max daily wallet withdrawal in sats (0 for no limit, -1 to block withdrawal)',
-  wallet_max_ballance: 'Wallet max balance in sats (0 to disable)',
-  wallet_limit_secs_between_trans:
-    'Min secs between transactions per wallet (0 to disable)',
+  wallet_limit_max_withdraw_per_day: 'Maximum daily withdrawal',
+  wallet_max_ballance: 'Maximum wallet balance',
+  wallet_limit_secs_between_trans: 'Minimum time between payments',
+  zero_disables_limit: 'Enter 0 for no limit.',
+  payment_permissions: 'Payment permissions',
+  send_and_receive: 'Send and receive',
+  receive_only: 'Receive only',
+  payment_permissions_desc:
+    'Receive-only mode disables outgoing payments for every wallet.',
   only_incoming_payments_allowed: 'Allow incoming payments only',
   disable_outgoing_payments: 'Disable outgoing payments',
   number_of_requests: 'Number of requests to allow',
@@ -428,6 +471,8 @@ window.localisation.en = {
   login_to_account: 'Login to your account',
   create_account: 'Create account',
   account_settings: 'Account Settings',
+  account_settings_description:
+    'Manage your profile, identity, and account credentials.',
   signin_with_oauth: 'Login with',
   signin_with_oauth_or: 'or Login with',
   signin_with_nostr: 'Continue with Nostr',
@@ -461,6 +506,12 @@ window.localisation.en = {
   picture: 'Picture',
   user_picture_desc:
     'URL to an image to use as profile picture. You can upload it as an asset.',
+  account_notifications_description:
+    'Choose where account and payment notifications are delivered.',
+  account_assets_description:
+    'Upload and manage images and other assets owned by your account.',
+  account_labels_description:
+    'Create reusable labels for organising wallets and payments.',
   verify_email: 'Verify email with',
   account: 'Account',
   update_account: 'Update Account',
@@ -468,20 +519,28 @@ window.localisation.en = {
   auth_provider: 'Auth Provider',
   external_id: 'External ID',
   my_account: 'My Account',
+  my_account_description:
+    'Manage your profile, notifications, appearance, access, and personal data.',
   existing_account_question: 'Already have an account?',
   background_image: 'Background Image',
   back: 'Back',
   logout: 'Logout',
   look_and_feel: 'Look and Feel',
+  look_and_feel_description:
+    'Choose your language, theme, background, and interface preferences.',
   endpoint: 'Endpoint',
   api: 'API',
   api_stripe: 'API',
   api_token: 'API Token',
   api_tokens: 'API Tokens',
   access_control_list: 'Access Control List',
+  access_control_list_description:
+    'Create restricted API tokens and control their endpoint permissions.',
   access_control_list_admin_warning:
     'This is an admin account. The generated tokens will have admin privileges.',
   new_api_acl: 'New Access Control List',
+  acl_token_active: 'Active',
+  acl_token_expired: 'Expired',
   api_token_id: 'Token Id',
   toggle_gradient: 'Toggle Gradient',
   gradient_background: 'Gradient Background',
@@ -519,6 +578,64 @@ window.localisation.en = {
   admin_settings: 'Admin Settings',
   extension_cost: 'This release requires a payment of minimum {cost} sats.',
   extension_paid_sats: 'You have already paid {paid_sats} sats.',
+  extension_permissions_title: 'Grant extension permissions',
+  extension_permissions_tab: 'Extension Permissions',
+  user_permissions_tab: 'My Grants',
+  extension_permissions_none: 'This extension has no install-time permissions.',
+  user_permissions_none:
+    'You have not granted any permissions for this extension.',
+  user_permissions_max_amount: 'Max payment amount',
+  user_permissions_destination_policy: 'Allowed destinations',
+  user_permissions_no_editable_settings: 'This grant has no editable settings.',
+  extension_permissions_grant_install: 'Grant and install',
+  extension_permissions_high_risk_warning:
+    'This extension requests permissions that can move funds.',
+  extension_permission_risk_low: 'Low risk',
+  extension_permission_risk_medium: 'Medium risk',
+  extension_permission_risk_high: 'High risk',
+  extension_permission_warning_wallet_pay_invoice:
+    'Can spend funds from wallets available to your account.',
+  extension_permission_warning_wallet_pay_invoice_background:
+    'Can spend funds later from approved wallets without an active click.',
+  extension_permission_warning_wallet_payments_watch:
+    'Can read payment metadata for approved wallets.',
+  extension_permission_warning_extension_api_request_write:
+    'Can write data or trigger actions in approved extensions.',
+  extension_permission_ext_storage_read: 'Read extension storage',
+  extension_permission_ext_storage_append_public:
+    'Append public extension storage',
+  extension_permission_ext_storage_append_public_sources:
+    'Allowed append targets',
+  extension_permission_ext_storage_append_public_max_rows_per_source:
+    'Max rows per source',
+  extension_permission_ext_storage_read_public: 'Read public extension storage',
+  extension_permission_ext_storage_read_public_source_required:
+    'required to read',
+  extension_permission_ext_storage_write: 'Write extension storage',
+  extension_permission_ext_storage_read_write: 'Read & Write extension storage',
+  extension_permission_extension_api_request: 'Use other extensions',
+  extension_permission_extension_api_request_extensions: 'Allowed extensions',
+  extension_permission_access_read: 'Read',
+  extension_permission_access_write: 'Write',
+  extension_permission_http_request: 'Connect to external websites',
+  extension_permission_http_request_hosts: 'Allowed hosts',
+  extension_permission_utils_basic: 'Use basic LNbits utilities',
+  extension_permission_ui_camera_scan_qr: 'Scan QR codes',
+  extension_permission_websocket: 'Use extension websockets',
+  extension_permission_websocket_publish_limits: 'Publish limits',
+  extension_permission_websocket_publish_max_messages_per_second:
+    'Max messages per second',
+  extension_permission_websocket_publish: 'Publish websocket messages',
+  extension_permission_websocket_subscribe: 'Subscribe to websocket messages',
+  extension_permission_wallet_payments_watch: 'Watch wallet payments',
+  extension_permission_wallet_create_invoice: 'Create invoices',
+  extension_permission_wallet_create_invoice_public:
+    'Create Lightning invoices from public pages',
+  extension_permission_wallet_balance_read: 'View wallet balances',
+  extension_permission_wallet_list: 'List wallets',
+  extension_permission_wallet_pay_invoice: 'Pay invoices',
+  extension_permission_wallet_pay_invoice_background:
+    'Make background payments',
   create_extension: 'Create Extension',
   release_details_error: 'Cannot get the release details.',
   pay_from_wallet: 'Pay from Wallet',
@@ -616,6 +733,7 @@ window.localisation.en = {
   routing_fee_reserve_calculations_desc:
     'LNbits sets aside a “reserve amount” for each payment to cover routing fees. The maximum routing fee passed to the funding source is whichever is higher: the <strong>minimum routing fee reserve</strong> or the <strong>routing fee reserve percentage</strong>.',
   millisats: 'millisats',
+  sats: 'sats',
   fee_reserve: 'Minimum Routing Fee Reserve',
   fee_reserve_percent: 'Routing Fee Reserve Percentage',
   fee_reserve_min_hint:
@@ -625,6 +743,9 @@ window.localisation.en = {
   payment_timeouts: 'Payment Timeouts',
   payment_wait_time: 'Payment Wait Time',
   seconds: 'seconds',
+  minutes: 'minutes',
+  hours: 'hours',
+  days: 'days',
   payment_pending_interval: 'Check payment interval (sec)',
   payment_pending_interval_desc: 'Interval to check pending payments',
   payment_pending_interval_tooltip:
@@ -636,9 +757,9 @@ window.localisation.en = {
   server_management: 'Server Management',
   base_url_label: 'Base URL of the server',
   authentication: 'Authentication',
-  auth_token_expiry_label: 'Token expiry (minutes)',
+  auth_token_expiry_label: 'Token expiry',
   auth_token_expiry_hint: 'Time in minutes until the token expires',
-  auth_authentication_cache_label: 'Cache time (minutes)',
+  auth_authentication_cache_label: 'Authentication cache time',
   auth_authentication_cache_hint:
     'Time in minutes to cache successful authentication (0 to disable)',
   auth_allowed_methods_label: 'Allowed authorization methods',
@@ -668,7 +789,11 @@ window.localisation.en = {
   auth_oidc_custom_org_label:
     'OIDC Custom Organization Name (e.g., Zitadel, Authentik)',
   auth_oidc_custom_icon_label: 'OIDC Custom Icon (URL)',
-  currency_settings: 'Currency Settings',
+  security_tools_desc:
+    'Advanced request filtering, rate limiting, callbacks, and server diagnostics.',
+  currency_settings: 'Currency',
+  currency_settings_desc:
+    'Choose which fiat currencies are available and the accounting default.',
   allowed_currencies: 'Allowed Currencies',
   allowed_currencies_hint:
     'Set the allowed fiat currencies for the exchange features',
@@ -678,19 +803,29 @@ window.localisation.en = {
   min_incoming_payment_amount: 'Min Incoming Payment Amount',
   min_incoming_payment_amount_desc:
     'Minimum amount allowed for generating an invoice',
-  max_incoming_payment_amount: 'Maximum Incoming Payment Amount',
-  max_incoming_payment_amount_desc:
-    'Maximum amount allowed when generating an invoice',
-  max_outgoing_payment_amount: 'Maximum Outgoing Payment Amount',
-  max_outgoing_payment_amount_desc:
-    'Maximum amount allowed when making a payment',
-  service_fees: 'Service Fees',
+  payment_limits: 'Payment limits',
+  payment_limits_desc: 'Set the largest payment wallets can send or receive.',
+  payment_limits_warning:
+    'These limits apply globally and may reject payments or invoices.',
+  max_incoming_payment_amount: 'Maximum incoming payment',
+  max_incoming_payment_amount_desc: 'Largest invoice a wallet can create.',
+  max_outgoing_payment_amount: 'Maximum outgoing payment',
+  max_outgoing_payment_amount_desc: 'Largest payment a wallet can send.',
+  lightning_addresses_desc:
+    'Control address resolution, custom wallet addresses, and reserved names.',
+  service_fees: 'Service fees',
+  service_fees_desc: 'Charge a percentage fee on outgoing transactions.',
   service_fee: 'Service Fee',
   service_fee_label: 'Service Fee Charged Per Transaction',
+  service_fee_hint: 'Fee charged per transaction (%)',
+  service_fee_max: 'Maximum Service Fee (sats)',
   service_fee_max_label: 'Maximum Service Fee Limit',
+  service_fee_max_hint: 'Maximum service fee to charge in (sats)',
   fee_wallet_label: 'Service Fee Wallet ID',
   fee_wallet_hint: 'The ID of the wallet to which to send service funds',
   disable_fee: 'Disable Service Fees for Internal Payments',
+  disable_fee_desc:
+    'Do not charge fees when both wallets are on this instance.',
   ui_management: 'UI Management',
   ui_site_title: 'Site Title',
   ui_changing_remove_lnbits_elements:
@@ -841,5 +976,107 @@ window.localisation.en = {
   payment_labels_updated: 'Payment labels updated',
   color: 'Color',
   sort: 'Sort',
-  sort_by: 'Sort by'
+  sort_by: 'Sort by',
+  lightning_address: 'Lightning Address',
+  lightning_addresses: 'Lightning Addresses',
+  lightning_address_price: 'Lightning Address price',
+  enable_lightning_address: 'Enable Lightning Addresses',
+  ln_address_mode: 'Lightning Address Resolution Mode',
+  ln_address_core_first: 'Resolve from LNbits Core first',
+  ln_address_extension_first: 'Resolve from Pay Links extension first',
+  ln_address_extension_only: 'Resolve from Pay Links extension only',
+  ln_address_mode_hint:
+    'Choose how LNbits should resolve Lightning Addresses. Using both LNbits Core and the Pay Links extension will have a small impact on performance.',
+  enable_lightning_address_for_all_wallets:
+    'Enable Lightning Addresses for all LNbits wallets',
+  allow_users_specify_lightning_addresses:
+    'Allow users to specify Lightning Addresses',
+  allow_wallet_owners_set_custom_lightning_addresses:
+    'Allow wallet owners to set custom Lightning Addresses',
+  charge_for_lightning_addresses: 'Charge for Lightning Addresses',
+  charge_users_set_change_lightning_address:
+    'Charge users when they set or change a Lightning Address.',
+  service_fee_wallet_id_must_be_set:
+    'Service Fee Wallet ID must be set in the Service Fees section below for this to work.',
+  lightning_address_blacklist: 'Lightning Address blacklist',
+  lightning_address_blacklist_instructions:
+    'Newline separated reserved words. Users cannot choose a Lightning Address that matches any of these words.',
+  set_lightning_address: 'Set Lightning Address',
+  block_explorer: 'Block Explorer',
+  enable_block_explorer: 'Enable Block Explorer',
+  block_explorer_desc:
+    'Allow users to explore Bitcoin transactions and addresses via Electrum.',
+  blockexplorer_public_api: 'Public API Access',
+  blockexplorer_public_api_desc:
+    'Allow unauthenticated access to the block explorer API endpoints.',
+  blockexplorer_in_user_menu: 'Add to user menus',
+  blockexplorer_in_user_menu_desc:
+    'Show Block Explorer in the navigation menu for regular users.',
+  view_public_block_explorer: 'View public block explorer page',
+  public_page: 'Public Page',
+  electrum_compatible_server: 'Electrum compatible server',
+  electrum_server_url: 'Electrum Server URL',
+  electrum_server_url_hint:
+    'Choose a public Electrum server or enter your own.',
+  electrum_server_url_custom: 'Custom Electrum Server URL',
+  view_public_electrum_servers: 'View public Electrum servers',
+  blockexplorer_network: 'Bitcoin Network',
+  blockexplorer_network_hint:
+    'The network the Electrum server is connected to, used to render addresses correctly.',
+  blockexplorer_search_label: 'Search by TXID or Address',
+  blockexplorer_search_hint:
+    '64-char hex = transaction  ·  anything else = Bitcoin address',
+  recent_blocks: 'Recent Blocks',
+  latest: 'Latest',
+  projected_blocks: 'Projected',
+  next_block: 'Next block',
+  projected_block: 'Block {number}',
+  projected_block_desc: 'Projected from the Electrum mempool fee histogram',
+  block_intervals: 'Block Intervals',
+  block_intervals_desc: 'Time between the most recent blocks',
+  block_interval_short: '{minutes} min interval',
+  minutes_short: '{value} min average',
+  observed_block_time: 'Observed block time',
+  target_block_time: '10 minute target',
+  mempool_fee_distribution: 'Mempool Fee Distribution',
+  mempool_fee_distribution_desc: 'Queued transaction size by fee rate',
+  mempool_virtual_size: 'Mempool virtual size',
+  virtual_size_mb: 'Virtual size (MvB)',
+  fee_rate_axis: 'Fee rate (sat/vB)',
+  chain_tip: 'Chain Tip',
+  block_height: 'Block Height',
+  block_fee: 'block fee',
+  fee_estimates: 'Fee Estimates',
+  confirmed_balance: 'Confirmed Balance',
+  unconfirmed_balance: 'Unconfirmed Balance',
+  transaction_history: 'Transaction History',
+  pagination_range: '{start}–{end} of {total}',
+  coinbase: 'Coinbase',
+  inputs: 'Inputs',
+  outputs: 'Outputs',
+  confirmations: 'Confirmations',
+  confirmed: 'Confirmed',
+  unconfirmed: 'Unconfirmed',
+  no_transactions: 'No transactions found',
+  history_unavailable:
+    'Transaction history unavailable (address has too many transactions)',
+  address: 'Address',
+  block_number: 'Block #{height}',
+  block_diff: 'diff {value}',
+  block_hash: 'Hash',
+  previous_block: 'Previous Block',
+  merkle_root: 'Merkle Root',
+  version: 'Version',
+  bits: 'Bits',
+  difficulty: 'Difficulty',
+  nonce: 'Nonce',
+  block_transactions_unavailable:
+    'Transaction listing is not supported by the configured Electrum server.',
+  transaction_position: 'Transaction {position}',
+  previous_page: 'Previous',
+  next_page: 'Next',
+  txid: 'TXID',
+  vsize: 'Virtual Size',
+  weight: 'Weight',
+  n_block_fee: '{n}-block fee'
 }

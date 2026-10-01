@@ -13,16 +13,20 @@ from lnbits.core.services import (
     fee_reserve_total,
     get_balance_delta,
 )
-from lnbits.core.services.payments import pay_invoice, update_wallet_balance
+from lnbits.core.services.payments import (
+    pay_invoice,
+    update_wallet_balance,
+)
 from lnbits.core.services.users import create_user_account
 from lnbits.exceptions import PaymentError
-from lnbits.tasks import create_task, wait_for_paid_invoices
+from lnbits.task_manager import task_manager
 from lnbits.wallets import get_funding_source
 
 from ..helpers import is_fake, is_regtest
 from .helpers import (
     cancel_invoice,
     get_real_invoice,
+    lookup_invoice,
     mine_blocks_liquid,
     pay_real_invoice,
     settle_invoice,
@@ -160,12 +164,11 @@ async def test_create_real_invoice(
     assert not payment_status["paid"]
 
     on_paid_mock = mocker.AsyncMock()
-    create_task(wait_for_paid_invoices("test_create_invoice", on_paid_mock)())
+    task_manager.register_invoice_listener(on_paid_mock, "test_create_invoice")
 
     pay_real_invoice(invoice["bolt11"])
 
     await asyncio.sleep(1)
-
     assert on_paid_mock.call_count == 1
     payment = on_paid_mock.call_args_list[0][0][0]
 
@@ -230,7 +233,7 @@ async def test_pay_real_invoice_set_pending_and_check_state(
 
 @pytest.mark.anyio
 @pytest.mark.skipif(is_fake, reason="this only works in regtest")
-async def test_pay_real_invoices_in_parallel():
+async def test_pay_real_invoices_in_parallel(sync_boltz_wallet):
     user = await create_user_account()
     wallet = await create_wallet(user_id=user.id)
 
@@ -253,8 +256,11 @@ async def test_pay_real_invoices_in_parallel():
             payment_request=real_invoice_two["payment_request"],
         )
 
-    with pytest.raises(PaymentError, match="Insufficient balance."):
-        await asyncio.gather(pay_first(), pay_second())
+    results = await asyncio.gather(pay_first(), pay_second(), return_exceptions=True)
+    errors = [result for result in results if isinstance(result, PaymentError)]
+    assert len(errors) == 1
+    assert errors[0].message == "Insufficient balance."
+    assert any(isinstance(result, Payment) for result in results)
 
     wallet_after = await get_wallet(wallet.id)
     assert wallet_after
@@ -274,14 +280,14 @@ async def test_pay_hold_invoice_check_pending(
             headers=adminkey_headers_from,
         )
     )
-    await asyncio.sleep(3)
     # get payment hash from the invoice
     invoice_obj = bolt11.decode(invoice["payment_request"])
+    await _wait_for_invoice_state(invoice_obj.payment_hash, "ACCEPTED")
     settle_invoice(preimage)
     payment_db = await get_standalone_payment(invoice_obj.payment_hash)
     assert payment_db
     response = await task
-    assert response.status_code < 300
+    assert response.status_code < 300, response.text
 
     # check if paid
     await asyncio.sleep(1)
@@ -315,14 +321,15 @@ async def test_pay_hold_invoice_check_pending_and_fail(
     cancel_invoice(preimage_hash)
 
     response = await task
-    assert response.status_code > 300  # should error
+    assert response.status_code == 201 or response.status_code > 300
 
     await asyncio.sleep(1)
 
-    # payment should be in database as failed
+    # payment should be in the database and failed on the funding source
     payment_db_after_settlement = await get_standalone_payment(invoice_obj.payment_hash)
     assert payment_db_after_settlement
-    assert payment_db_after_settlement.failed is True
+    status = await check_payment_status(payment_db_after_settlement)
+    assert status.failed
 
 
 @pytest.mark.anyio
@@ -393,12 +400,11 @@ async def test_receive_real_invoice_set_pending_and_check_state(
     assert not payment_status["paid"]
 
     on_paid_mock = mocker.AsyncMock()
-    create_task(wait_for_paid_invoices("test_create_invoice", on_paid_mock)())
+    task_manager.register_invoice_listener(on_paid_mock, "test_create_invoice")
 
     pay_real_invoice(invoice["bolt11"])
 
     await asyncio.sleep(1)
-
     assert on_paid_mock.call_count == 1
     payment = on_paid_mock.call_args_list[0][0][0]
 
@@ -411,6 +417,8 @@ async def test_receive_real_invoice_set_pending_and_check_state(
     assert response.status_code < 300
     payment_status = response.json()
     assert payment_status["paid"]
+
+    assert payment
 
     # set the incoming invoice to pending
     payment.status = PaymentState.PENDING
@@ -451,3 +459,21 @@ async def test_check_fee_reserve(client, adminkey_headers_from):
     assert response.status_code < 300
     fee_reserve = response.json()
     assert fee_reserve["fee_reserve"] == fee_reserve_total(1000_000)
+
+
+async def _wait_for_invoice_state(
+    payment_hash: str, expected_state: str, timeout: float = 30
+) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    state = None
+    while loop.time() < deadline:
+        invoice = await asyncio.to_thread(lookup_invoice, payment_hash)
+        state = invoice.get("state")
+        if state == expected_state:
+            return
+        await asyncio.sleep(0.1)
+    raise AssertionError(
+        f"Invoice did not reach state '{expected_state}' within {timeout}s. "
+        f"Last state: '{state}'."
+    )

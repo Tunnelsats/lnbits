@@ -13,6 +13,7 @@ from fastapi.routing import APIRoute
 from loguru import logger
 from packaging import version
 from pydantic.schema import field_schema
+from random_username.generate import generate_username  # type: ignore[import-untyped]
 from starlette.templating import Jinja2Templates
 
 from lnbits.settings import settings
@@ -20,6 +21,10 @@ from lnbits.utils.crypto import AESCipher
 from lnbits.utils.exchange_rates import currencies
 
 from .db import FilterModel
+
+
+def generate_ln_address() -> str:
+    return generate_username(1)[0].lower()
 
 
 def get_db_vendor_name():
@@ -256,20 +261,39 @@ def is_lnbits_version_ok(
 
 
 def check_callback_url(url: str):
-    if not settings.lnbits_callback_url_rules:
-        # no rules, all urls are allowed
-        return
     u = urlparse(url)
+    try:
+        port = u.port
+    except ValueError as exc:
+        raise ValueError("Callback URL is not allowed.") from exc
+    if (
+        u.scheme not in {"http", "https"}
+        or not u.hostname
+        or u.username is not None
+        or u.password is not None
+    ):
+        raise ValueError("Callback URL is not allowed.")
+
+    host = u.hostname.lower()
+    if ":" in host:
+        host = f"[{host}]"
+    origin = f"{u.scheme}://{host}"
+    if port is not None:
+        origin += f":{port}"
+
+    if not settings.lnbits_callback_url_rules:
+        # no rules, all valid callback urls are allowed
+        return
     for rule in settings.lnbits_callback_url_rules:
         try:
-            if re.match(rule, f"{u.scheme}://{u.netloc}") is not None:
+            if re.fullmatch(rule, origin) is not None:
                 return
         except re.error:
             logger.debug(f"Invalid regex rule: '{rule}'. ")
             continue
     raise ValueError(
-        f"Callback not allowed. URL: {url}. Netloc: {u.netloc}. "
-        f"Please check your admin settings."
+        f"Callback URL origin '{origin}' is not allowed. "
+        "Please check your admin settings."
     )
 
 
@@ -310,12 +334,7 @@ def get_api_routes(routes: list) -> dict[str, str]:
 
 def path_segments(path: str) -> list[str]:
     path = path.strip("/")
-    segments = path.split("/")
-    if len(segments) < 2:
-        return segments
-    if segments[0] == "upgrades":
-        return segments[2:]
-    return segments[0:]
+    return path.split("/")
 
 
 def normalize_path(path: str | None) -> str:
@@ -372,3 +391,13 @@ def sha256s(value: str) -> str:
     Returns the hex as a string.
     """
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def daystart_timestamp(dt: datetime | None = None) -> int:
+    """
+    Returns the timestamp of the start of the day for the given
+    datetime (or now in UTC if not provided).
+    """
+    dt = dt or datetime.now(timezone.utc)
+    day_start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    return int(day_start.timestamp())

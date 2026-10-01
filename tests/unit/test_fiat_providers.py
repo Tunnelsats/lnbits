@@ -4,6 +4,7 @@ import json
 import time
 from base64 import b64encode
 from unittest.mock import AsyncMock
+from urllib.parse import parse_qs
 
 import pytest
 from pytest_mock.plugin import MockerFixture
@@ -33,8 +34,10 @@ from lnbits.fiat.base import (
     FiatStatusResponse,
     FiatSubscriptionPaymentOptions,
 )
+from lnbits.fiat.paypal import PayPalWallet
 from lnbits.fiat.revolut import REVOLUT_WEBHOOK_EVENTS, RevolutWallet
 from lnbits.fiat.square import SquareWallet
+from lnbits.fiat.stripe import StripeWallet
 from lnbits.settings import Settings
 from tests.helpers import get_random_string
 
@@ -364,6 +367,194 @@ async def test_create_wallet_fiat_invoice_success(
     status = await check_payment_status(payment)
     assert status.paid is True
     assert status.success is True
+
+
+@pytest.mark.anyio
+async def test_stripe_wallet_uses_currency_minor_units(settings: Settings):
+    settings.stripe_api_endpoint = "https://api.stripe.com"
+    settings.stripe_api_secret_key = "stripe-secret"
+
+    wallet = StripeWallet()
+    client = MockHTTPClient(
+        [
+            MockHTTPResponse(json_data={"id": "cs_usd", "url": "https://usd"}),
+            MockHTTPResponse(json_data={"id": "cs_kwd", "url": "https://kwd"}),
+            MockHTTPResponse(json_data={"id": "cs_jpy", "url": "https://jpy"}),
+            MockHTTPResponse(
+                json_data={"id": "pi_kwd", "client_secret": "pi_kwd_secret"}
+            ),
+            MockHTTPResponse(json_data={"id": "cs_other", "url": "https://other"}),
+        ]
+    )
+    wallet.client = client  # type: ignore[assignment]
+
+    await wallet.create_invoice(1.23, "hash_usd", "USD")
+    await wallet.create_invoice(
+        1.234,
+        "hash_kwd",
+        "KWD",
+        extra={
+            "checkout": {"metadata": {"lnbits_amount": "1", "lnbits_currency": "USD"}}
+        },
+    )
+    await wallet.create_invoice(123, "hash_jpy", "JPY")
+    await wallet.create_invoice(
+        1.234, "hash_terminal", "KWD", extra={"fiat_method": "terminal"}
+    )
+
+    checkout_amounts = [
+        parse_qs(client.calls[i][1]["content"])[
+            "line_items[0][price_data][unit_amount]"
+        ][0]
+        for i in range(3)
+    ]
+    assert checkout_amounts == ["123", "1234", "123"]
+    kwd_metadata = parse_qs(client.calls[1][1]["content"])
+    assert kwd_metadata["metadata[lnbits_amount]"] == ["1.234"]
+    assert kwd_metadata["metadata[lnbits_currency]"] == ["KWD"]
+    assert client.calls[3][1]["data"]["amount"] == "1234"
+    assert client.calls[3][1]["data"]["metadata[lnbits_amount]"] == "1.234"
+    assert client.calls[3][1]["data"]["metadata[lnbits_currency]"] == "KWD"
+
+    other = await wallet.create_invoice(1.23, "hash_other", "XYZ")
+    excessive_precision = await wallet.create_invoice(1.2345, "hash_precision", "KWD")
+    other_data = parse_qs(client.calls[4][1]["content"])
+    assert other.success is True
+    assert other_data["line_items[0][price_data][unit_amount]"] == ["123"]
+    assert excessive_precision.failed is True
+    assert len(client.calls) == 5
+
+
+@pytest.mark.anyio
+async def test_stripe_wallet_verifies_settled_amount_and_currency(
+    settings: Settings,
+):
+    settings.stripe_api_endpoint = "https://api.stripe.com"
+    settings.stripe_api_secret_key = "stripe-secret"
+
+    paid_session = {
+        "id": "cs_kwd",
+        "payment_status": "paid",
+        "amount_total": 100_000,
+        "currency": "kwd",
+    }
+    wallet = StripeWallet()
+    wallet.client = MockHTTPClient(  # type: ignore[assignment]
+        [
+            MockHTTPResponse(
+                json_data={
+                    **paid_session,
+                    "metadata": {
+                        "lnbits_amount": "100",
+                        "lnbits_currency": "KWD",
+                    },
+                }
+            ),
+            MockHTTPResponse(
+                json_data={
+                    **paid_session,
+                    "metadata": {
+                        "lnbits_amount": "10",
+                        "lnbits_currency": "KWD",
+                    },
+                }
+            ),
+            MockHTTPResponse(
+                json_data={
+                    **paid_session,
+                    "metadata": {
+                        "lnbits_amount": "100",
+                        "lnbits_currency": "USD",
+                    },
+                }
+            ),
+            MockHTTPResponse(json_data={**paid_session, "metadata": {}}),
+        ]
+    )
+
+    matching = await wallet.get_invoice_status("cs_kwd")
+    wrong_amount = await wallet.get_invoice_status("cs_kwd")
+    wrong_currency = await wallet.get_invoice_status("cs_kwd")
+    missing_expected = await wallet.get_invoice_status("cs_kwd")
+
+    assert matching.success is True
+    assert wrong_amount.pending is True
+    assert wrong_currency.pending is True
+    assert missing_expected.pending is True
+
+
+@pytest.mark.anyio
+async def test_paypal_wallet_captures_approved_order(
+    settings: Settings, mocker: MockerFixture
+):
+    wallet, client = await _mock_paypal_wallet(
+        settings,
+        mocker,
+        [
+            MockHTTPResponse(json_data={"status": "APPROVED"}),
+            MockHTTPResponse(json_data=_paypal_order("COMPLETED")),
+        ],
+    )
+
+    status = await wallet.get_invoice_status("fiat_paypal_ORDER123")
+
+    assert status.success is True
+    assert [call[0] for call in client.calls] == [
+        "/v2/checkout/orders/ORDER123",
+        "/v2/checkout/orders/ORDER123/capture",
+    ]
+    assert client.calls[1][1]["json"] == {}
+    assert client.calls[1][1]["headers"]["PayPal-Request-Id"] == ("capture-ORDER123")
+
+
+@pytest.mark.anyio
+async def test_paypal_wallet_does_not_credit_pending_capture(
+    settings: Settings, mocker: MockerFixture
+):
+    wallet, _ = await _mock_paypal_wallet(
+        settings,
+        mocker,
+        [
+            MockHTTPResponse(json_data={"status": "APPROVED"}),
+            MockHTTPResponse(json_data=_paypal_order("PENDING")),
+        ],
+    )
+
+    status = await wallet.get_invoice_status("fiat_paypal_ORDER123")
+
+    assert status.pending is True
+
+
+@pytest.mark.anyio
+async def test_paypal_wallet_requires_capture_for_completed_order(
+    settings: Settings, mocker: MockerFixture
+):
+    wallet, client = await _mock_paypal_wallet(
+        settings,
+        mocker,
+        [MockHTTPResponse(json_data={"status": "COMPLETED"})],
+    )
+
+    status = await wallet.get_invoice_status("fiat_paypal_ORDER123")
+
+    assert status.pending is True
+    assert len(client.calls) == 1
+
+
+@pytest.mark.anyio
+async def test_paypal_wallet_subscription_status_is_unchanged(
+    settings: Settings, mocker: MockerFixture
+):
+    wallet, client = await _mock_paypal_wallet(
+        settings,
+        mocker,
+        [MockHTTPResponse(json_data={"status": "COMPLETED"})],
+    )
+
+    status = await wallet.get_invoice_status("fiat_paypal_subscription_CAPTURE123")
+
+    assert status.success is True
+    assert client.calls[0][0] == "v2/payments/captures/CAPTURE123"
 
 
 @pytest.mark.anyio
@@ -1433,7 +1624,7 @@ def test_check_revolut_signature_multiple_v1_headers():
     check_revolut_signature(payload, sig_header, timestamp, secret)
 
 
-def test_check_revolut_signature_docs_vector():
+def test_check_revolut_signature_docs_vector(mocker: MockerFixture):
     payload = (
         b'{"data":{"id":"645a7696-22f3-aa47-9c74-cbae0449cc46",'
         b'"new_state":"completed","old_state":"pending",'
@@ -1445,9 +1636,16 @@ def test_check_revolut_signature_docs_vector():
     secret = "wsk_r59a4HfWVAKycbCaNO1RvgCJec02gRd8"
     sig = "v1=bca326fb378d0da7f7c490ad584a8106bab9723d8d9cdd0d50b4c5b3be3837c0"
 
-    check_revolut_signature(
-        payload, sig, timestamp, secret, tolerance_seconds=100000000
+    # This is a fixed vector straight from Revolut's docs, so its timestamp is
+    # necessarily in the past. Freeze time to it instead of growing
+    # tolerance_seconds indefinitely as real time marches on.
+    mocker.patch(
+        "lnbits.core.services.fiat_providers.time.time",
+        return_value=int(timestamp) / 1000,
     )
+    check_revolut_signature(payload, sig, timestamp, secret)
+
+    check_revolut_signature(payload, sig, timestamp, secret)
 
 
 @pytest.mark.anyio
@@ -1717,7 +1915,9 @@ async def test_check_fiat_status_handles_internal_states(mocker: MockerFixture):
         "lnbits.core.services.fiat_providers.get_fiat_provider",
         AsyncMock(return_value=provider),
     )
-    queue_put = mocker.patch("lnbits.tasks.internal_invoice_queue.put", AsyncMock())
+    queue_put = mocker.patch(
+        "lnbits.task_manager.task_manager.internal_invoice_queue.put_nowait"
+    )
 
     success_status = await check_fiat_status(
         Payment(
@@ -1734,7 +1934,8 @@ async def test_check_fiat_status_handles_internal_states(mocker: MockerFixture):
     )
 
     assert success_status.success is True
-    queue_put.assert_awaited_once_with("fiat_pending")
+    queue_put.assert_called_once()
+    assert queue_put.call_args[0][0].checking_id == "fiat_pending"
 
     await check_fiat_status(
         Payment(
@@ -1749,7 +1950,7 @@ async def test_check_fiat_status_handles_internal_states(mocker: MockerFixture):
             extra={"fiat_checking_id": "stripe_checking_id"},
         )
     )
-    assert queue_put.await_count == 1
+    assert queue_put.call_count == 1
 
 
 @pytest.mark.anyio
@@ -1786,7 +1987,9 @@ async def test_check_fiat_status_persists_successful_payment(
         "lnbits.fiat.StripeWallet.get_invoice_status",
         AsyncMock(return_value=FiatPaymentStatus(paid=True)),
     )
-    queue_put = mocker.patch("lnbits.tasks.internal_invoice_queue.put", AsyncMock())
+    queue_put = mocker.patch(
+        "lnbits.task_manager.task_manager.internal_invoice_queue.put_nowait"
+    )
 
     status = await check_fiat_status(payment)
 
@@ -1794,7 +1997,7 @@ async def test_check_fiat_status_persists_successful_payment(
     assert payment.status == PaymentState.SUCCESS
     updated_payment = await get_payment(payment.checking_id)
     assert updated_payment.status == PaymentState.SUCCESS
-    queue_put.assert_awaited_once_with(payment.checking_id)
+    queue_put.assert_called_once_with(payment)
 
 
 @pytest.mark.anyio
@@ -1902,3 +2105,29 @@ async def test_test_connection_reports_provider_status(mocker: MockerFixture):
     success_status = await fiat_provider_connection("stripe")
     assert success_status.success is True
     assert success_status.message == "Connection test successful. Balance: 21.0."
+
+
+async def _mock_paypal_wallet(
+    settings: Settings,
+    mocker: MockerFixture,
+    responses: list[MockHTTPResponse],
+) -> tuple[PayPalWallet, MockHTTPClient]:
+    mocker.patch.object(
+        settings, "paypal_api_endpoint", "https://api-m.sandbox.paypal.com"
+    )
+    mocker.patch.object(settings, "paypal_client_id", "client-id")
+    mocker.patch.object(settings, "paypal_client_secret", "client-secret")
+    wallet = PayPalWallet()
+    await wallet.client.aclose()
+    client = MockHTTPClient(responses)
+    wallet.client = client  # type: ignore[assignment]
+    wallet._access_token = "access-token"
+    wallet._token_expires_at = time.time() + 300
+    return wallet, client
+
+
+def _paypal_order(capture_status: str) -> dict:
+    return {
+        "status": "COMPLETED",
+        "purchase_units": [{"payments": {"captures": [{"status": capture_status}]}}],
+    }
