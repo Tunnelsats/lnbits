@@ -1,16 +1,21 @@
 import asyncio
+import ipaddress
 import logging
+import re
 import sys
 from collections.abc import Callable
-import re
 from hashlib import sha256
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from lnbits.core.services import websocket_updater
 from lnbits.helpers import get_db_vendor_name
 from lnbits.settings import settings
+
+if TYPE_CHECKING:
+    from loguru import Record
 
 
 def log_server_info():
@@ -55,44 +60,76 @@ def initialize_server_websocket_logger() -> Callable:
     return update_websocket_serverlog
 
 
-def hash_ip(ip: str) -> str:
-    return sha256(ip.encode()).hexdigest()
+# IP obfuscation (Tunnelsats fork):
+# Client IP addresses must never end up in plain text in any log sink (stdout,
+# log files, admin websocket server log). IPv4 addresses keep the first three
+# octets (`203.0.113.xxx`), IPv6 addresses keep the first 48 bits
+# (`2001:db8:1234:xxxx:xxxx:xxxx:xxxx:xxxx`). Loopback and unspecified addresses
+# (e.g. `127.0.0.1`, `0.0.0.0`, `::1`) are left untouched as they carry no
+# personal data and are useful for debugging.
+_IPV4_CANDIDATE = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)")
+_IPV6_CANDIDATE = re.compile(
+    r"(?<![\w:])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,5}){2,8}(?![\w:.])"
+)
+_IPV6_PORT_SUFFIX = re.compile(r"^(?P<ip>.+):(?P<port>\d{1,5})$")
 
 
-def ip_hashing_filter(record: logging.LogRecord) -> bool:
-    # IPv4 and IPv6 patterns
-    ipv4_pattern = r"(?:\d{1,3}\.){3}\d{1,3}"
-    ipv6_pattern = r"(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}|:(?::[0-9a-fA-F]{1,4}){1,7}|::"
-    ip_regex = re.compile(f"({ipv4_pattern}|{ipv6_pattern})")
+def _parse_ip(
+    value: str,
+) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        ip = ipaddress.ip_address(value)
+    except ValueError:
+        return None
+    if ip.is_loopback or ip.is_unspecified:
+        return None
+    return ip
 
-    if record.args:
-        record.args = tuple(
-            hash_ip(arg) if isinstance(arg, str) and ip_regex.match(arg) else arg
-            for arg in record.args
-        )
-    if record.msg:
-        record.msg = ip_regex.sub(lambda match: hash_ip(match.group(0)), record.msg)
-    return True
+
+def _mask_ipv4(match: re.Match) -> str:
+    candidate = match.group(0)
+    if _parse_ip(candidate) is None:
+        return candidate
+    return candidate.rsplit(".", 1)[0] + ".xxx"
+
+
+def _mask_ipv6_address(ip: ipaddress.IPv6Address) -> str:
+    prefix = [format(int(group, 16), "x") for group in ip.exploded.split(":")[:3]]
+    return ":".join([*prefix, "xxxx", "xxxx", "xxxx", "xxxx", "xxxx"])
+
+
+def _mask_ipv6(match: re.Match) -> str:
+    candidate = match.group(0)
+    ip = _parse_ip(candidate)
+    if isinstance(ip, ipaddress.IPv6Address):
+        return _mask_ipv6_address(ip)
+    # uvicorn logs IPv6 clients as `<ip>:<port>` without brackets
+    with_port = _IPV6_PORT_SUFFIX.match(candidate)
+    if with_port:
+        ip = _parse_ip(with_port.group("ip"))
+        if isinstance(ip, ipaddress.IPv6Address):
+            return f"{_mask_ipv6_address(ip)}:{with_port.group('port')}"
+    return candidate
+
+
+def obfuscate_ips(message: str) -> str:
+    """Mask the host part of every IPv4/IPv6 address found in `message`."""
+    message = _IPV4_CANDIDATE.sub(_mask_ipv4, message)
+    return _IPV6_CANDIDATE.sub(_mask_ipv6, message)
+
+
+def obfuscate_ips_patcher(record: "Record") -> None:
+    record["message"] = obfuscate_ips(record["message"])
 
 
 def configure_logger() -> None:
     logger.remove()
+    # applies to every sink, including the uvicorn logs routed through
+    # `InterceptHandler` and the admin websocket server log
+    logger.configure(patcher=obfuscate_ips_patcher)
     log_level: str = "DEBUG" if settings.debug else "INFO"
     formatter = Formatter()
     logger.add(sys.stdout, level=log_level, format=formatter.format)
-
-    # IP obfuscation
-    # Access the 'uvicorn' and 'uvicorn.access' loggers
-    uvicorn_logger = logging.getLogger("uvicorn")
-    uvicorn_access_logger = logging.getLogger("uvicorn.access")
-
-    # Add the IP hashing filter
-    uvicorn_logger.addFilter(ip_hashing_filter)
-    uvicorn_access_logger.addFilter(ip_hashing_filter)
-
-    # Ensure the loggers are enabled
-    uvicorn_logger.disabled = False
-    uvicorn_access_logger.disabled = False
 
     if settings.enable_log_to_file:
         logger.add(
@@ -148,7 +185,6 @@ class Formatter:
 
 class InterceptHandler(logging.Handler):
     def emit(self, record):
-        ip_hashing_filter(record)
         try:
             level = logger.level(record.levelname).name
         except ValueError:
