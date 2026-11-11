@@ -34,6 +34,11 @@ async def test_onchain_schema_uses_wallets_and_addresses(
                     deleted BOOLEAN NOT NULL DEFAULT false
                 )
             """)
+            await conn.execute("""
+                CREATE TABLE apipayments (
+                    checking_id TEXT PRIMARY KEY
+                )
+            """)
             await conn.execute(
                 "INSERT INTO wallets (id, wallet_type) VALUES ('existing', 'lightning')"
             )
