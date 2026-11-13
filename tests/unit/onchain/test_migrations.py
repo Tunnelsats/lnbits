@@ -28,15 +28,13 @@ async def test_onchain_schema_uses_wallets_and_addresses(
                 )
             """)
             await conn.execute("""
+                CREATE TABLE apipayments (checking_id TEXT PRIMARY KEY)
+            """)
+            await conn.execute("""
                 CREATE TABLE wallets (
                     id TEXT PRIMARY KEY,
                     wallet_type TEXT NOT NULL,
                     deleted BOOLEAN NOT NULL DEFAULT false
-                )
-            """)
-            await conn.execute("""
-                CREATE TABLE apipayments (
-                    checking_id TEXT PRIMARY KEY
                 )
             """)
             await conn.execute(
